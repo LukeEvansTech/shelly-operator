@@ -75,8 +75,7 @@ spec:
               profileRef:
                 description: |-
                   ProfileRef pins this device to a ShellyProfile by object name (same
-                  namespace), bypassing selector matching. (Consumed by the device
-                  controller in a later plan.)
+                  namespace), bypassing selector matching.
                 maxLength: 253
                 type: string
             type: object

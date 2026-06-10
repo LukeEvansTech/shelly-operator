@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,11 +68,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if dev.Spec.Paused {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonPaused,
-			"reconciliation paused via spec.paused", nil, "")
+			"reconciliation paused via spec.paused", nil, dev.Status.MatchedProfile)
 	}
 	if !dev.Status.Online {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonOffline,
-			"device offline; skipping drift check", nil, "")
+			"device offline; skipping drift check", nil, dev.Status.MatchedProfile)
 	}
 
 	var profiles shellyv1alpha1.ShellyProfileList
@@ -93,7 +94,12 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	desiredName := dev.Spec.DisplayName
 	if desiredName == "" {
-		desiredName = r.lookupName(ctx, dev.Namespace, dev.Name)
+		var nameErr error
+		desiredName, nameErr = r.lookupName(ctx, dev.Namespace, dev.Name)
+		if nameErr != nil {
+			return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+				nameErr.Error(), nil, profile.Name)
+		}
 	}
 
 	c := shelly.NewClient(dev.Status.Address, shelly.WithHTTPClient(r.HTTP))
@@ -166,17 +172,21 @@ func (r *ShellyDeviceReconciler) finish(ctx context.Context, dev *shellyv1alpha1
 	return ctrl.Result{RequeueAfter: r.jitter()}, nil
 }
 
-// lookupName resolves a device's desired name from the name-map ConfigMap
-// ("" when unset/absent). Uses the uncached Reader.
-func (r *ShellyDeviceReconciler) lookupName(ctx context.Context, namespace, deviceName string) string {
+// lookupName resolves a device's desired name from the name-map ConfigMap.
+// A missing ConfigMap means "no name managed" (""); any other read error
+// is returned so a transient API failure can't masquerade as in-sync.
+func (r *ShellyDeviceReconciler) lookupName(ctx context.Context, namespace, deviceName string) (string, error) {
 	if r.NameMapName == "" || r.Reader == nil {
-		return ""
+		return "", nil
 	}
 	var cm corev1.ConfigMap
 	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.NameMapName}, &cm); err != nil {
-		return ""
+		if apierrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading name map %s/%s: %w", namespace, r.NameMapName, err)
 	}
-	return cm.Data[deviceName]
+	return cm.Data[deviceName], nil
 }
 
 // jitter spreads requeues +/-10% so 46 devices don't thunder in lockstep.

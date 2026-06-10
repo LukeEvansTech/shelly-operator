@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly/shellytest"
@@ -347,5 +349,34 @@ func TestReconcileOfflineSkipsRPC(t *testing.T) {
 	}
 	if len(fake.RecordedCalls()) != 0 {
 		t.Errorf("offline device must not be probed: %v", fake.RecordedCalls())
+	}
+}
+
+// errReader fails every Get with a non-NotFound error.
+type errReader struct{}
+
+func (errReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	return fmt.Errorf("boom")
+}
+
+func (errReader) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return fmt.Errorf("boom")
+}
+
+func TestReconcileNameMapReadError(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev12", MAC: "AABBCCDDEE2C", Gen: 2}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE2C", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Name: &shellyv1alpha1.NameSection{Managed: true},
+	})
+	r, _ := newReconciler()
+	r.Reader = errReader{}
+	dev := reconcile(t, r, ns, "aabbccddee2c")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || !strings.Contains(cond.Message, "name map") {
+		t.Fatalf("name-map read failure must not masquerade as in-sync; condition = %+v", cond)
 	}
 }

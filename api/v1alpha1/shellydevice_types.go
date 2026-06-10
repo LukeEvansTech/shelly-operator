@@ -34,8 +34,7 @@ type ShellyDeviceSpec struct {
 	DisplayName string `json:"displayName,omitempty"`
 
 	// ProfileRef pins this device to a ShellyProfile by object name (same
-	// namespace), bypassing selector matching. (Consumed by the device
-	// controller in a later plan.)
+	// namespace), bypassing selector matching.
 	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	ProfileRef string `json:"profileRef,omitempty"`

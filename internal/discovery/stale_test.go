@@ -48,4 +48,15 @@ func TestMarkStale(t *testing.T) {
 	if !dev.Status.Online {
 		t.Error("fresh device should stay online")
 	}
+
+	// Second run is a no-op: already-offline devices are skipped.
+	if err := markStale(ctx, k8sClient, ns, now.Add(-5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "aabbccddee01"}, &dev); err != nil {
+		t.Fatal(err)
+	}
+	if dev.Status.Online || dev.Status.LastSeen == nil {
+		t.Errorf("idempotent re-run changed state: %+v", dev.Status)
+	}
 }

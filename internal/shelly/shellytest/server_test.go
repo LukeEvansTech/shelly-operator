@@ -27,7 +27,7 @@ func TestProbeEndpoint(t *testing.T) {
 }
 
 func TestRPCSetConfigMergesAndRecords(t *testing.T) {
-	d := &Device{ID: "dev1", Gen: 2, Config: map[string]map[string]any{
+	d := &Device{ID: "dev1", Gen: 2, InitialConfig: map[string]map[string]any{
 		"sys": {"device": map[string]any{"name": "old", "eco_mode": false}},
 	}}
 	srv := New(d)
@@ -42,15 +42,17 @@ func TestRPCSetConfigMergesAndRecords(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %s", resp.Status)
 	}
-	dev := d.Config["sys"]["device"].(map[string]any)
+	cfg := d.ConfigSnapshot()
+	dev := cfg["sys"]["device"].(map[string]any)
 	if dev["name"] != "PDU-01" {
 		t.Errorf("name not applied: %v", dev)
 	}
 	if dev["eco_mode"] != false {
 		t.Errorf("merge clobbered sibling key: %v", dev)
 	}
-	if len(d.Calls) != 1 || d.Calls[0].Method != "Sys.SetConfig" {
-		t.Errorf("calls not recorded: %+v", d.Calls)
+	calls := d.RecordedCalls()
+	if len(calls) != 1 || calls[0].Method != "Sys.SetConfig" {
+		t.Errorf("calls not recorded: %+v", calls)
 	}
 }
 
@@ -73,5 +75,44 @@ func TestRPCUnknownMethodReturnsError(t *testing.T) {
 	}
 	if rr.Error == nil || rr.Error.Code != 404 {
 		t.Errorf("expected error 404, got %+v", rr.Error)
+	}
+}
+
+func TestRPCSwitchSetConfigKeyedComponent(t *testing.T) {
+	d := &Device{ID: "dev1", Gen: 2}
+	srv := New(d)
+	defer srv.Close()
+
+	body := `{"id":1,"method":"Switch.SetConfig","params":{"id":0,"config":{"auto_off":true}}}`
+	resp, err := http.Post(srv.URL+"/rpc", "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	cfg := d.ConfigSnapshot()
+	if cfg["switch:0"] == nil || cfg["switch:0"]["auto_off"] != true {
+		t.Errorf("switch:0 config = %v", cfg["switch:0"])
+	}
+}
+
+func TestRPCWrongPasswordStays401(t *testing.T) {
+	d := &Device{ID: "dev1", Gen: 2, Password: "right"}
+	srv := New(d)
+	defer srv.Close()
+
+	// No Authorization header at all -> challenge
+	resp, err := http.Post(srv.URL+"/rpc", "application/json", bytes.NewBufferString(`{"id":1,"method":"Shelly.GetDeviceInfo"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %s, want 401", resp.Status)
+	}
+	if d.Challenges() != 1 {
+		t.Errorf("Challenges() = %d, want 1", d.Challenges())
+	}
+	if len(d.RecordedCalls()) != 0 {
+		t.Errorf("unauthenticated call must not be recorded")
 	}
 }

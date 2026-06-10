@@ -120,8 +120,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 }
 
 // post sends the payload, answering one digest challenge if the device
-// returns 401 and we have a password. (digest.go provides authHeader and
-// setChallenge; until then the stubs below stand in.)
+// returns 401 and we have a password (see digest.go).
 func (c *Client) post(ctx context.Context, payload []byte) (*http.Response, error) {
 	resp, err := c.send(ctx, payload, c.authHeader())
 	if err != nil {
@@ -131,6 +130,7 @@ func (c *Client) post(ctx context.Context, payload []byte) (*http.Response, erro
 		return resp, nil
 	}
 	challenge := resp.Header.Get("WWW-Authenticate")
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so the retry reuses the connection
 	resp.Body.Close()
 	if err := c.setChallenge(challenge); err != nil {
 		return nil, err

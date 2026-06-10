@@ -3,6 +3,7 @@ package shelly_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
@@ -38,5 +39,32 @@ func TestCallWrongPassword(t *testing.T) {
 	var authErr *shelly.AuthError
 	if !errors.As(err, &authErr) {
 		t.Fatalf("expected *AuthError, got %v", err)
+	}
+}
+
+func TestCallConcurrentDigestAuth(t *testing.T) {
+	d := &shellytest.Device{ID: "dev1", Gen: 2, Password: "hunter2"}
+	srv := shellytest.New(d)
+	defer srv.Close()
+
+	c := shelly.NewClient(hostOf(srv.URL), shelly.WithPassword("hunter2"))
+	const n = 16
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = c.Call(context.Background(), "Shelly.GetDeviceInfo", nil, nil)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("call %d: %v", i, err)
+		}
+	}
+	if got := len(d.RecordedCalls()); got != n {
+		t.Errorf("authorized calls = %d, want %d", got, n)
 	}
 }

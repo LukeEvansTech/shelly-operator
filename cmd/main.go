@@ -192,10 +192,20 @@ func main() {
 	// +kubebuilder:scaffold:builder
 
 	if discoveryCIDRs != "" {
+		var sweepCIDRs []string
+		for _, c := range strings.Split(discoveryCIDRs, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				sweepCIDRs = append(sweepCIDRs, c)
+			}
+		}
+		if _, err := discovery.ExpandCIDRs(sweepCIDRs); err != nil {
+			setupLog.Error(err, "invalid --discovery-cidrs")
+			os.Exit(1)
+		}
 		if err := mgr.Add(&discovery.Sweeper{
 			Client:    mgr.GetClient(),
 			Namespace: deviceNamespace,
-			CIDRs:     strings.Split(discoveryCIDRs, ","),
+			CIDRs:     sweepCIDRs,
 			Interval:  discoveryInterval,
 		}); err != nil {
 			setupLog.Error(err, "unable to add discovery sweeper")

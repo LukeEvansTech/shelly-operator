@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
@@ -26,8 +27,8 @@ func TestSweeperRunOnce(t *testing.T) {
 		Namespace:    ns,
 		ExtraHosts:   []string{hostOf(srv.URL), "127.0.0.1:1"},
 		Interval:     time.Minute,
-		ProbeTimeout: 500 * time.Millisecond,
-		OfflineAfter: 50 * time.Millisecond,
+		ProbeTimeout: 5 * time.Second,
+		OfflineAfter: time.Minute,
 	}
 	if err := s.RunOnce(ctx); err != nil {
 		t.Fatal(err)
@@ -42,9 +43,14 @@ func TestSweeperRunOnce(t *testing.T) {
 		t.Errorf("after first sweep: %+v", dev.Status)
 	}
 
-	// Device disappears; after OfflineAfter elapses the next sweep marks it offline.
+	// Device disappears. Instead of sleeping past OfflineAfter (flaky, and
+	// metav1.Time only has second precision on the wire), backdate LastSeen
+	// directly and let the next sweep mark it offline.
 	srv.Close()
-	time.Sleep(60 * time.Millisecond)
+	dev.Status.LastSeen = &metav1.Time{Time: time.Now().Add(-time.Hour)}
+	if err := k8sClient.Status().Update(ctx, &dev); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}

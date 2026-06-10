@@ -28,7 +28,8 @@ type Sweeper struct {
 	Concurrency  int           // concurrent probes; default 32
 	OfflineAfter time.Duration // mark offline when unseen this long; default 3*Interval
 
-	hc      *http.Client
+	hc *http.Client
+	// targets is computed once at first use; changing CIDRs requires a restart (flag-driven config restarts the pod anyway).
 	targets []string
 }
 
@@ -45,7 +46,7 @@ func (s *Sweeper) Start(ctx context.Context) error {
 	ticker := time.NewTicker(s.Interval)
 	defer ticker.Stop()
 	for {
-		if err := s.RunOnce(ctx); err != nil {
+		if err := s.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error(err, "sweep finished with errors")
 		}
 		select {
@@ -69,6 +70,11 @@ func (s *Sweeper) init() error {
 	if s.OfflineAfter <= 0 {
 		s.OfflineAfter = 3 * s.Interval
 	}
+	if s.OfflineAfter < time.Second {
+		// metav1.Time has one-second wire precision; a sub-second window
+		// would let a sweep mark devices it just refreshed offline.
+		s.OfflineAfter = time.Second
+	}
 	if s.hc == nil {
 		s.hc = &http.Client{Timeout: s.ProbeTimeout}
 	}
@@ -85,13 +91,18 @@ func (s *Sweeper) init() error {
 // RunOnce performs a single sweep: probe all targets, upsert answers,
 // mark long-unseen devices offline. Per-device errors are joined, not
 // fatal — one bad device must not stop the sweep.
+// Not safe to call concurrently with Start.
 func (s *Sweeper) RunOnce(ctx context.Context) error {
 	if err := s.init(); err != nil {
 		return err
 	}
 	now := time.Now()
+	found := probeAll(ctx, s.hc, s.targets, s.Concurrency)
+	if ctx.Err() != nil {
+		return ctx.Err() // shutting down: don't upsert partial results
+	}
 	var errs []error
-	for _, f := range probeAll(ctx, s.hc, s.targets, s.Concurrency) {
+	for _, f := range found {
 		if err := applyDevice(ctx, s.Client, s.Namespace, now, f); err != nil {
 			errs = append(errs, err)
 		}

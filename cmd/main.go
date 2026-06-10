@@ -20,6 +20,8 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -36,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
+	"github.com/LukeEvansTech/shelly-operator/internal/discovery"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -78,6 +81,15 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	var discoveryCIDRs string
+	var deviceNamespace string
+	var discoveryInterval time.Duration
+	flag.StringVar(&discoveryCIDRs, "discovery-cidrs", "",
+		"Comma-separated IPv4 CIDRs to sweep for Shelly devices. Empty disables discovery.")
+	flag.StringVar(&deviceNamespace, "device-namespace", "default",
+		"Namespace where ShellyDevice objects are created.")
+	flag.DurationVar(&discoveryInterval, "discovery-interval", 5*time.Minute,
+		"Time between discovery sweeps.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -178,6 +190,20 @@ func main() {
 	}
 
 	// +kubebuilder:scaffold:builder
+
+	if discoveryCIDRs != "" {
+		if err := mgr.Add(&discovery.Sweeper{
+			Client:    mgr.GetClient(),
+			Namespace: deviceNamespace,
+			CIDRs:     strings.Split(discoveryCIDRs, ","),
+			Interval:  discoveryInterval,
+		}); err != nil {
+			setupLog.Error(err, "unable to add discovery sweeper")
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("discovery disabled: no --discovery-cidrs configured")
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to set up health check")

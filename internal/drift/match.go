@@ -20,6 +20,10 @@ import (
 // (pin-only profile); an empty non-nil selector matches everything.
 // Invalid selectors are skipped with a warning so one bad profile can't
 // break matching for the rest.
+//
+// The returned pointer aliases the caller's profiles slice; it stays valid
+// only while that slice's backing array is alive and unmodified (callers
+// must not append to profiles after calling).
 func MatchProfile(dev *shellyv1alpha1.ShellyDevice, profiles []shellyv1alpha1.ShellyProfile) (*shellyv1alpha1.ShellyProfile, []string) {
 	if ref := dev.Spec.ProfileRef; ref != "" {
 		for i := range profiles {
@@ -50,7 +54,7 @@ func MatchProfile(dev *shellyv1alpha1.ShellyDevice, profiles []shellyv1alpha1.Sh
 	if len(candidates) == 0 {
 		return nil, warnings
 	}
-	sort.Slice(candidates, func(a, b int) bool {
+	sort.SliceStable(candidates, func(a, b int) bool {
 		if candidates[a].Spec.Priority != candidates[b].Spec.Priority {
 			return candidates[a].Spec.Priority > candidates[b].Spec.Priority
 		}

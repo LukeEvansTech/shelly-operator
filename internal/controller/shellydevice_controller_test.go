@@ -226,3 +226,107 @@ func TestReconcileAuthDrift(t *testing.T) {
 		t.Errorf("driftedSections = %v", dev.Status.DriftedSections)
 	}
 }
+
+func TestReconcileConfigFetchFailedKeepsProfile(t *testing.T) {
+	ns := newNamespace(t)
+	createDevice(t, ns, "AABBCCDDEE26", "127.0.0.1:1", true, false, "")
+	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee26")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != shellyv1alpha1.ReasonConfigFetchFailed {
+		t.Fatalf("condition = %+v", cond)
+	}
+	if dev.Status.MatchedProfile != "plugs" {
+		t.Errorf("matchedProfile must survive fetch failure, got %q", dev.Status.MatchedProfile)
+	}
+}
+
+func TestReconcileAuthRequired(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev7", MAC: "AABBCCDDEE27", Gen: 2, Password: "secret"}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE27", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee27")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Reason != shellyv1alpha1.ReasonAuthRequired {
+		t.Fatalf("condition = %+v, want AuthRequired", cond)
+	}
+}
+
+func TestReconcileProfileRefPin(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev8", MAC: "AABBCCDDEE28", Gen: 2}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE28", hostOf(srv.URL), true, false, "pinned")
+	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{}) // selector match, would win without pin
+	pin := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "pinned"},
+		Spec:       shellyv1alpha1.ShellyProfileSpec{Mode: shellyv1alpha1.ModeObserve},
+	}
+	if err := k8sClient.Create(context.Background(), pin); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee28")
+	if dev.Status.MatchedProfile != "pinned" {
+		t.Errorf("matchedProfile = %q, want pinned", dev.Status.MatchedProfile)
+	}
+}
+
+func TestReconcileDisplayNamePrecedence(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev9", MAC: "AABBCCDDEE29", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"name": "old"}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	dev := createDevice(t, ns, "AABBCCDDEE29", hostOf(srv.URL), true, false, "")
+	dev.Spec.DisplayName = "front-desk"
+	if err := k8sClient.Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+		Name: &shellyv1alpha1.NameSection{Managed: true},
+	})
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "shelly-names"},
+		Data:       map[string]string{"aabbccddee29": "rack-pdu"},
+	}
+	if err := k8sClient.Create(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := newReconciler()
+	got := reconcile(t, r, ns, "aabbccddee29")
+	cond := meta.FindStatusCondition(got.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || !strings.Contains(cond.Message, "front-desk") {
+		t.Errorf("displayName must beat name map; condition = %+v", cond)
+	}
+}
+
+func TestReconcileFixpointNoStatusChurn(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev10", MAC: "AABBCCDDEE2A", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE2A", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+	r, _ := newReconciler()
+	first := reconcile(t, r, ns, "aabbccddee2a")
+	second := reconcile(t, r, ns, "aabbccddee2a")
+	if first.ResourceVersion != second.ResourceVersion {
+		t.Errorf("steady-state reconcile must not churn status: rv %s -> %s", first.ResourceVersion, second.ResourceVersion)
+	}
+}

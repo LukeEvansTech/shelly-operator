@@ -15,4 +15,8 @@ const (
 	ReasonOffline           = "Offline"
 	ReasonPaused            = "Paused"
 	ReasonConfigFetchFailed = "ConfigFetchFailed"
+	// ReasonAuthRequired: the device requires digest auth credentials the
+	// controller does not have yet (password support ships with
+	// enforcement).
+	ReasonAuthRequired = "AuthRequired"
 )

@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"strings"
@@ -15,8 +17,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/drift"
@@ -94,22 +99,33 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	c := shelly.NewClient(dev.Status.Address, shelly.WithHTTPClient(r.HTTP))
 	actual, err := c.GetConfig(ctx)
 	if err != nil {
-		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
-			fmt.Sprintf("fetching device config: %v", err), nil, profile.Name)
+		reason := shellyv1alpha1.ReasonConfigFetchFailed
+		msg := fmt.Sprintf("fetching device config: %v", err)
+		var authErr *shelly.AuthError
+		if errors.As(err, &authErr) {
+			reason = shellyv1alpha1.ReasonAuthRequired
+			msg = "device requires auth credentials; password support ships with enforcement"
+		}
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, reason, msg, nil, profile.Name)
 	}
 
 	desired := drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err := drift.Diff(desired, actual)
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+			fmt.Sprintf("parsing device config: %v", err), nil, profile.Name)
 	}
 	if a := profile.Spec.Config.Auth; a != nil && a.Enable != nil && *a.Enable != dev.Status.AuthEnabled {
 		findings = append(findings, drift.Finding{Section: "auth", Path: "enable", Want: *a.Enable, Have: dev.Status.AuthEnabled})
 	}
 
 	if profile.Spec.Mode == shellyv1alpha1.ModeEnforce && len(findings) > 0 && r.Recorder != nil {
-		r.Recorder.Event(&dev, corev1.EventTypeWarning, "EnforcementPending",
-			"profile mode is enforce, but enforcement is not implemented yet; observing only")
+		// Emit only on the transition into drift; steady-state drift would
+		// otherwise spam an event every reconcile.
+		if prev := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync); prev == nil || prev.Status != metav1.ConditionFalse {
+			r.Recorder.Event(&dev, corev1.EventTypeWarning, "EnforcementPending",
+				"profile mode is enforce, but enforcement is not implemented yet; observing only")
+		}
 	}
 
 	if len(findings) == 0 {
@@ -126,6 +142,7 @@ func (r *ShellyDeviceReconciler) finish(ctx context.Context, dev *shellyv1alpha1
 	status metav1.ConditionStatus, reason, message string, findings []drift.Finding, matchedProfile string) (ctrl.Result, error) {
 
 	prev := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	base := dev.DeepCopy()
 
 	dev.Status.MatchedProfile = matchedProfile
 	dev.Status.DriftedSections = drift.Sections(findings)
@@ -136,7 +153,7 @@ func (r *ShellyDeviceReconciler) finish(ctx context.Context, dev *shellyv1alpha1
 		Message:            message,
 		ObservedGeneration: dev.Generation,
 	})
-	if err := r.Status().Update(ctx, dev); err != nil {
+	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
 	}
 	if r.Recorder != nil && (prev == nil || prev.Status != status || prev.Reason != reason) {
@@ -171,10 +188,12 @@ func (r *ShellyDeviceReconciler) jitter() time.Duration {
 	return time.Duration(float64(d) * (0.9 + 0.2*rand.Float64()))
 }
 
-// SetupWithManager wires the controller: reconciles on device changes and
-// re-enqueues every device in the namespace when any profile changes.
-// Name-map ConfigMap changes are NOT watched (that would cache every
-// ConfigMap in the cluster); they propagate within one requeue interval.
+// SetupWithManager wires the controller: reconciles on device changes (only
+// when spec/labels or consumed status fields change, so discovery lastSeen
+// sweeps do not re-trigger reconciles) and re-enqueues every device in the
+// namespace when any profile changes. Name-map ConfigMap changes are NOT
+// watched (that would cache every ConfigMap in the cluster); they propagate
+// within one requeue interval.
 func (r *ShellyDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	mapAll := func(ctx context.Context, obj client.Object) []ctrl.Request {
 		var devs shellyv1alpha1.ShellyDeviceList
@@ -187,8 +206,25 @@ func (r *ShellyDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return reqs
 	}
+	devChanged := predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldDev, ok1 := e.ObjectOld.(*shellyv1alpha1.ShellyDevice)
+			newDev, ok2 := e.ObjectNew.(*shellyv1alpha1.ShellyDevice)
+			if !ok1 || !ok2 {
+				return true
+			}
+			if oldDev.Generation != newDev.Generation || !maps.Equal(oldDev.Labels, newDev.Labels) {
+				return true
+			}
+			// Only the status fields this controller consumes; lastSeen
+			// refreshes from the sweeper must not re-trigger reconciles.
+			return oldDev.Status.Online != newDev.Status.Online ||
+				oldDev.Status.Address != newDev.Status.Address ||
+				oldDev.Status.AuthEnabled != newDev.Status.AuthEnabled
+		},
+	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&shellyv1alpha1.ShellyDevice{}).
+		For(&shellyv1alpha1.ShellyDevice{}, builder.WithPredicates(devChanged)).
 		Watches(&shellyv1alpha1.ShellyProfile{}, handler.EnqueueRequestsFromMapFunc(mapAll)).
 		Named("shellydevice").
 		Complete(r)

@@ -5,6 +5,21 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - shelly.thirdimpact.io
   resources:
   - shellydevices
@@ -23,3 +38,11 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - shelly.thirdimpact.io
+  resources:
+  - shellyprofiles
+  verbs:
+  - get
+  - list
+  - watch

@@ -55,10 +55,10 @@ func createDevice(t *testing.T, ns, mac, addr string, online, paused bool, profi
 	return dev
 }
 
-func createProfile(t *testing.T, ns, name string, cfg shellyv1alpha1.ProfileConfig) {
+func createProfile(t *testing.T, ns string, cfg shellyv1alpha1.ProfileConfig) {
 	t.Helper()
 	p := &shellyv1alpha1.ShellyProfile{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
 		Spec: shellyv1alpha1.ShellyProfileSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
 			Mode:     shellyv1alpha1.ModeObserve,
@@ -99,7 +99,7 @@ func TestReconcileDriftDetected(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE20", hostOf(srv.URL), true, false, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)}, // drifted
 		Cloud:  &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},  // in sync
 	})
@@ -135,7 +135,7 @@ func TestReconcileInSync(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE21", hostOf(srv.URL), true, false, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
 	})
 
@@ -167,7 +167,7 @@ func TestReconcilePausedSkipsRPC(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE23", hostOf(srv.URL), true, true, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{})
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{})
 
 	r, _ := newReconciler()
 	dev := reconcile(t, r, ns, "aabbccddee23")
@@ -188,7 +188,7 @@ func TestReconcileNameMapDrift(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE24", hostOf(srv.URL), true, false, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Name: &shellyv1alpha1.NameSection{Managed: true},
 	})
 	cm := &corev1.ConfigMap{
@@ -216,7 +216,7 @@ func TestReconcileAuthDrift(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE25", hostOf(srv.URL), true, false, "") // status.authEnabled=false
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Auth: &shellyv1alpha1.AuthSection{Enable: boolPtr(true)},
 	})
 
@@ -230,7 +230,7 @@ func TestReconcileAuthDrift(t *testing.T) {
 func TestReconcileConfigFetchFailedKeepsProfile(t *testing.T) {
 	ns := newNamespace(t)
 	createDevice(t, ns, "AABBCCDDEE26", "127.0.0.1:1", true, false, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
 	})
 	r, _ := newReconciler()
@@ -250,7 +250,7 @@ func TestReconcileAuthRequired(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE27", hostOf(srv.URL), true, false, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
 	})
 	r, _ := newReconciler()
@@ -267,7 +267,7 @@ func TestReconcileProfileRefPin(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE28", hostOf(srv.URL), true, false, "pinned")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{}) // selector match, would win without pin
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{}) // selector match, would win without pin
 	pin := &shellyv1alpha1.ShellyProfile{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "pinned"},
 		Spec:       shellyv1alpha1.ShellyProfileSpec{Mode: shellyv1alpha1.ModeObserve},
@@ -294,7 +294,7 @@ func TestReconcileDisplayNamePrecedence(t *testing.T) {
 	if err := k8sClient.Update(context.Background(), dev); err != nil {
 		t.Fatal(err)
 	}
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Name: &shellyv1alpha1.NameSection{Managed: true},
 	})
 	cm := &corev1.ConfigMap{
@@ -320,7 +320,7 @@ func TestReconcileFixpointNoStatusChurn(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE2A", hostOf(srv.URL), true, false, "")
-	createProfile(t, ns, "plugs", shellyv1alpha1.ProfileConfig{
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
 	})
 	r, _ := newReconciler()
@@ -328,5 +328,24 @@ func TestReconcileFixpointNoStatusChurn(t *testing.T) {
 	second := reconcile(t, r, ns, "aabbccddee2a")
 	if first.ResourceVersion != second.ResourceVersion {
 		t.Errorf("steady-state reconcile must not churn status: rv %s -> %s", first.ResourceVersion, second.ResourceVersion)
+	}
+}
+
+func TestReconcileOfflineSkipsRPC(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev11", MAC: "AABBCCDDEE2B", Gen: 2}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE2B", hostOf(srv.URL), false, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee2b")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != shellyv1alpha1.ReasonOffline {
+		t.Fatalf("condition = %+v", cond)
+	}
+	if len(fake.RecordedCalls()) != 0 {
+		t.Errorf("offline device must not be probed: %v", fake.RecordedCalls())
 	}
 }

@@ -95,6 +95,8 @@ type ShellyDeviceStatus struct {
 	DriftedSections []string `json:"driftedSections,omitempty"`
 
 	// Conditions describe the device's reconciliation state.
+	// +listType=map
+	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

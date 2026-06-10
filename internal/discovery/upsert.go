@@ -66,8 +66,9 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 	dev.Status.LastSeen = &metav1.Time{Time: now}
 	if err := c.Status().Update(ctx, &dev); err != nil {
 		if apierrors.IsConflict(err) {
-			// Another status writer (the device controller) won the race;
-			// our refresh lands on the next sweep. Same policy as markStale.
+			// Stale resourceVersion: another writer (the device controller,
+			// or this function's own label update) changed the object since
+			// we read it. Our refresh lands on the next sweep.
 			return nil
 		}
 		return fmt.Errorf("discovery: update status %s: %w", name, err)

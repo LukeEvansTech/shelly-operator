@@ -1,6 +1,7 @@
 package drift
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -77,5 +78,25 @@ func TestSummarizeCapsLength(t *testing.T) {
 	s := Summarize(findings)
 	if !strings.Contains(s, "more") {
 		t.Errorf("Summarize must cap and mention remaining findings: %q", s)
+	}
+}
+
+func TestLeafEqualNumericAndSlices(t *testing.T) {
+	if !leafEqual(int32(300), float64(300)) {
+		t.Error("int32 vs float64 must be equal")
+	}
+	if !leafEqual([]any{"a"}, []any{"a"}) {
+		t.Error("equal slices must not panic and must be equal")
+	}
+	if leafEqual([]any{"a"}, []any{"b"}) {
+		t.Error("different slices must differ")
+	}
+}
+
+func TestDiffDecodeError(t *testing.T) {
+	desired := map[string]map[string]any{"sys": {"x": true}}
+	actual := map[string]json.RawMessage{"sys": json.RawMessage(`not-json`)}
+	if _, err := Diff(desired, actual); err == nil || !strings.Contains(err.Error(), "sys") {
+		t.Errorf("expected decode error naming the section, got %v", err)
 	}
 }

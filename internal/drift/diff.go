@@ -3,6 +3,7 @@ package drift
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -23,6 +24,9 @@ const maxSummarized = 5
 func Diff(desired map[string]map[string]any, actual map[string]json.RawMessage) ([]Finding, error) {
 	var findings []Finding
 	for _, section := range sortedKeys(desired) {
+		if len(desired[section]) == 0 {
+			continue
+		}
 		raw, ok := actual[section]
 		if !ok {
 			findings = append(findings, Finding{Section: section, Path: "", Want: "section present", Have: nil})
@@ -61,13 +65,15 @@ func diffMap(section, prefix string, want, have map[string]any) []Finding {
 	return out
 }
 
-// leafEqual compares JSON-normalized leaves; all numbers compare as float64.
+// leafEqual compares JSON-normalized leaves; all numbers compare as
+// float64. Non-scalar leaves (slices, etc.) fall back to DeepEqual so a
+// future renderer emitting them cannot panic interface equality.
 func leafEqual(w, h any) bool {
 	if wf, ok := toFloat(w); ok {
 		hf, ok2 := toFloat(h)
 		return ok2 && wf == hf
 	}
-	return w == h
+	return reflect.DeepEqual(w, h)
 }
 
 func toFloat(v any) (float64, bool) {

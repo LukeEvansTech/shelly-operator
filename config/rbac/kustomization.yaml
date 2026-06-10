@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the shelly-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- shellyprofile_admin_role.yaml
+- shellyprofile_editor_role.yaml
+- shellyprofile_viewer_role.yaml
 - shellydevice_admin_role.yaml
 - shellydevice_editor_role.yaml
 - shellydevice_viewer_role.yaml

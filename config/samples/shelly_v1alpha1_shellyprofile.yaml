@@ -1,0 +1,22 @@
+apiVersion: shelly.thirdimpact.io/v1alpha1
+kind: ShellyProfile
+metadata:
+  name: plugs-baseline
+spec:
+  selector:
+    matchLabels:
+      shelly.thirdimpact.io/app: PlusPlugUK
+  priority: 10
+  mode: observe
+  config:
+    system:
+      ecoMode: true
+    name:
+      managed: true
+    cloud:
+      enable: false
+    mqtt:
+      enable: true
+      server: mqtt.svc.cluster.local:1883
+    switch:
+      initialState: restore_last

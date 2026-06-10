@@ -17,4 +17,12 @@ resources:
   kind: ShellyDevice
   path: github.com/LukeEvansTech/shelly-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: thirdimpact.io
+  group: shelly
+  kind: ShellyProfile
+  path: github.com/LukeEvansTech/shelly-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

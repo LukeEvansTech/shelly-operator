@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/shelly.thirdimpact.io_shellydevices.yaml
+- bases/shelly.thirdimpact.io_shellyprofiles.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

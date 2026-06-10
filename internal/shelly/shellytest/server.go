@@ -165,10 +165,9 @@ func merge(dst, src map[string]any) map[string]any {
 	}
 	for k, v := range src {
 		if sm, ok := v.(map[string]any); ok {
-			if dm, ok := out[k].(map[string]any); ok {
-				out[k] = merge(dm, sm)
-				continue
-			}
+			dm, _ := out[k].(map[string]any) // nil dst -> pure recursive copy
+			out[k] = merge(dm, sm)
+			continue
 		}
 		out[k] = v
 	}

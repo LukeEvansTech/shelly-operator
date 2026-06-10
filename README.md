@@ -1,8 +1,17 @@
 # shelly-operator
-// TODO(user): Add simple overview of use/purpose
+
+A Kubernetes operator for GitOps fleet management of Shelly Gen2+ smart
+plugs: subnet-sweep discovery into `ShellyDevice` objects, declarative
+`ShellyProfile` config with continuous drift reconciliation over the Shelly
+JSON-RPC API, a device-list ConfigMap feed for
+[shelly_exporter](https://github.com/LukeEvansTech/shelly_exporter), and a
+read-only dashboard.
+
+Status: early development. Currently implemented: `internal/shelly` RPC
+client (probe, JSON-RPC call, SHA-256 digest auth, config get/set) with a
+fake-device test server.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
 
 ## Getting Started
 

@@ -15,7 +15,11 @@ import (
 
 // applyDevice records a probe result as a ShellyDevice: creates the object
 // on first sight, refreshes selector labels if identity changed, and
-// updates status. Spec is never touched — it belongs to users.
+// updates the discovery-owned status fields. Spec is never touched — it
+// belongs to users. Status fields owned by other controllers (e.g. future
+// conditions) are deliberately left alone, which is why fields are set
+// individually rather than replacing the whole struct.
+// f.Info must be non-nil with a non-empty MAC; the prober guarantees this.
 func applyDevice(ctx context.Context, c client.Client, namespace string, now time.Time, f Found) error {
 	name := shellyv1alpha1.DeviceObjectName(f.Info.MAC)
 	labels := shellyv1alpha1.DeviceLabels(f.Info.Model, f.Info.App, f.Info.Gen)
@@ -28,6 +32,11 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 			Namespace: namespace, Name: name, Labels: labels,
 		}}
 		if err := c.Create(ctx, &dev); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				// Stale cache: the object exists but our informer hasn't
+				// caught up. Skip this sweep; the next one will update it.
+				return nil
+			}
 			return fmt.Errorf("discovery: create %s: %w", name, err)
 		}
 	case err != nil:
@@ -46,18 +55,16 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 		}
 	}
 
-	dev.Status = shellyv1alpha1.ShellyDeviceStatus{
-		Address:     f.Host,
-		MAC:         f.Info.MAC,
-		Model:       f.Info.Model,
-		App:         f.Info.App,
-		Gen:         f.Info.Gen,
-		Firmware:    f.Info.Firmware,
-		AuthEnabled: f.Info.AuthEnabled,
-		DeviceName:  f.Info.Name,
-		Online:      true,
-		LastSeen:    &metav1.Time{Time: now},
-	}
+	dev.Status.Address = f.Host
+	dev.Status.MAC = f.Info.MAC
+	dev.Status.Model = f.Info.Model
+	dev.Status.App = f.Info.App
+	dev.Status.Gen = f.Info.Gen
+	dev.Status.Firmware = f.Info.Firmware
+	dev.Status.AuthEnabled = f.Info.AuthEnabled
+	dev.Status.DeviceName = f.Info.Name
+	dev.Status.Online = true
+	dev.Status.LastSeen = &metav1.Time{Time: now}
 	if err := c.Status().Update(ctx, &dev); err != nil {
 		return fmt.Errorf("discovery: update status %s: %w", name, err)
 	}

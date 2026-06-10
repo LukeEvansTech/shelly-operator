@@ -69,3 +69,46 @@ func TestApplyDeviceCreatesAndUpdates(t *testing.T) {
 		t.Errorf("status not refreshed: %+v", dev.Status)
 	}
 }
+
+func TestApplyDeviceRefreshesLabelsPreservesUserLabels(t *testing.T) {
+	ctx := context.Background()
+	ns := newNamespace(t)
+	now := time.Now()
+
+	f := Found{Host: "10.32.8.40", Info: &shelly.DeviceInfo{
+		ID: "dev-aabbccddee10", MAC: "AABBCCDDEE10",
+		Model: "SNPL-00112UK", App: "PlusPlugUK", Gen: 2,
+	}}
+	if err := applyDevice(ctx, k8sClient, ns, now, f); err != nil {
+		t.Fatal(err)
+	}
+
+	var dev shellyv1alpha1.ShellyDevice
+	key := types.NamespacedName{Namespace: ns, Name: "aabbccddee10"}
+	if err := k8sClient.Get(ctx, key, &dev); err != nil {
+		t.Fatal(err)
+	}
+	dev.Labels["user/zone"] = "rack-1"
+	if err := k8sClient.Update(ctx, &dev); err != nil {
+		t.Fatal(err)
+	}
+
+	// Firmware update changes the app name; labels must refresh.
+	f2 := f
+	f2.Info = &shelly.DeviceInfo{
+		ID: f.Info.ID, MAC: f.Info.MAC, Model: f.Info.Model,
+		App: "PlusPlugUKv2", Gen: 3,
+	}
+	if err := applyDevice(ctx, k8sClient, ns, now, f2); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(ctx, key, &dev); err != nil {
+		t.Fatal(err)
+	}
+	if dev.Labels[shellyv1alpha1.LabelApp] != "PlusPlugUKv2" || dev.Labels[shellyv1alpha1.LabelGen] != "3" {
+		t.Errorf("labels not refreshed: %v", dev.Labels)
+	}
+	if dev.Labels["user/zone"] != "rack-1" {
+		t.Errorf("user label clobbered: %v", dev.Labels)
+	}
+}

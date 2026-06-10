@@ -23,6 +23,11 @@ import (
 var k8sClient client.Client
 
 func TestMain(m *testing.M) {
+	os.Exit(testMain(m))
+}
+
+// testMain exists so deferred cleanup runs before os.Exit.
+func testMain(m *testing.M) int {
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
@@ -30,26 +35,25 @@ func TestMain(m *testing.M) {
 	cfg, err := testEnv.Start()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "envtest start (run via `make test` so KUBEBUILDER_ASSETS is set):", err)
-		os.Exit(1)
+		return 1
 	}
+	defer func() { _ = testEnv.Stop() }()
+
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 	if err := shellyv1alpha1.AddToScheme(scheme); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "client:", err)
-		_ = testEnv.Stop()
-		os.Exit(1)
+		return 1
 	}
-	code := m.Run()
-	_ = testEnv.Stop()
-	os.Exit(code)
+	return m.Run()
 }
 
 // newNamespace creates a fresh namespace so each test is isolated.

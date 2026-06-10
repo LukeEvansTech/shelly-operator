@@ -71,8 +71,8 @@ func TestDiffMissingSectionAndKey(t *testing.T) {
 }
 
 func TestSummarizeCapsLength(t *testing.T) {
-	var findings []Finding
-	for i := 0; i < 20; i++ {
+	findings := make([]Finding, 0, 20)
+	for range 20 {
 		findings = append(findings, Finding{Section: "sys", Path: "device.eco_mode", Want: true, Have: false})
 	}
 	s := Summarize(findings)

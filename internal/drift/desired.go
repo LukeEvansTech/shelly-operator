@@ -2,6 +2,7 @@ package drift
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
@@ -74,9 +75,7 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 			for comp := range actual {
 				if strings.HasPrefix(comp, "switch:") {
 					cp := make(map[string]any, len(sw))
-					for k, v := range sw {
-						cp[k] = v
-					}
+					maps.Copy(cp, sw)
 					out[comp] = cp
 				}
 			}

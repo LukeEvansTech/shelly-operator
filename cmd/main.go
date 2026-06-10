@@ -94,7 +94,7 @@ func main() {
 	var nameMapName string
 	var reconcileInterval time.Duration
 	flag.StringVar(&nameMapName, "name-map", "shelly-names",
-		"ConfigMap (in each device's namespace) mapping lowercased MAC to desired device name. Empty disables name management.")
+		"ConfigMap mapping lowercased MAC to device name. Empty disables.")
 	flag.DurationVar(&reconcileInterval, "reconcile-interval", 5*time.Minute,
 		"Steady-state drift check interval per device (jittered).")
 	opts := zap.Options{

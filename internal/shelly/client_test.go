@@ -3,6 +3,9 @@ package shelly_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
@@ -36,5 +39,35 @@ func TestCallRPCError(t *testing.T) {
 	}
 	if rpcErr.Code != 404 {
 		t.Errorf("Code = %d, want 404", rpcErr.Code)
+	}
+}
+
+func TestCallNoCredentialsAgainstProtectedDevice(t *testing.T) {
+	d := &shellytest.Device{ID: "dev1", Gen: 2, Password: "secret"}
+	srv := shellytest.New(d)
+	defer srv.Close()
+
+	err := shelly.NewClient(hostOf(srv.URL)).Call(context.Background(), "Shelly.GetDeviceInfo", nil, nil)
+	var authErr *shelly.AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected *AuthError, got %v", err)
+	}
+	if d.Challenges() != 1 {
+		t.Errorf("Challenges() = %d, want 1", d.Challenges())
+	}
+	if len(d.RecordedCalls()) != 0 {
+		t.Errorf("rejected call must not be recorded")
+	}
+}
+
+func TestCallNonRPCServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := shelly.NewClient(hostOf(srv.URL)).Call(context.Background(), "Shelly.GetDeviceInfo", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Errorf("expected status-500 error, got %v", err)
 	}
 }

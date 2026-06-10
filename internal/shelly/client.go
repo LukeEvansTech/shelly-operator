@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
+	"time"
 )
+
+// defaultHTTPClient bounds calls to unresponsive devices even when the
+// caller forgets a context deadline.
+var defaultHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // Client talks JSON-RPC to one Shelly Gen2+ device at http://<host>/rpc.
 // Safe for concurrent use. Digest auth (SHA-256, user "admin") is handled
@@ -28,12 +34,19 @@ type Option func(*Client)
 // WithPassword enables digest auth with the device admin password.
 func WithPassword(pw string) Option { return func(c *Client) { c.password = pw } }
 
-// WithHTTPClient overrides http.DefaultClient (e.g. to set a Timeout).
-func WithHTTPClient(hc *http.Client) Option { return func(c *Client) { c.hc = hc } }
+// WithHTTPClient overrides the default client (e.g. to set a shorter
+// Timeout). A nil hc is ignored.
+func WithHTTPClient(hc *http.Client) Option {
+	return func(c *Client) {
+		if hc != nil {
+			c.hc = hc
+		}
+	}
+}
 
 // NewClient creates a client for a device host ("10.32.8.38" or "host:port").
 func NewClient(host string, opts ...Option) *Client {
-	c := &Client{host: host, hc: http.DefaultClient}
+	c := &Client{host: host, hc: defaultHTTPClient}
 	for _, o := range opts {
 		o(c)
 	}
@@ -76,6 +89,10 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	}
 	resp, err := c.post(ctx, payload)
 	if err != nil {
+		var authErr *AuthError
+		if errors.As(err, &authErr) {
+			return authErr
+		}
 		return fmt.Errorf("shelly: %s %s: %w", method, c.host, err)
 	}
 	defer resp.Body.Close()
@@ -90,10 +107,11 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
 		return fmt.Errorf("shelly: %s %s: decode: %w", method, c.host, err)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection returns to the pool
 	if rr.Error != nil {
-		return rr.Error
+		return fmt.Errorf("shelly: %s %s: %w", method, c.host, rr.Error)
 	}
-	if result != nil {
+	if result != nil && len(rr.Result) > 0 {
 		if err := json.Unmarshal(rr.Result, result); err != nil {
 			return fmt.Errorf("shelly: %s %s: unmarshal result: %w", method, c.host, err)
 		}

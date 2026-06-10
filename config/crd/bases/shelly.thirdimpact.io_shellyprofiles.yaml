@@ -60,7 +60,7 @@ spec:
                       observed against the device's reported auth_en; password rollout ships
                       with enforcement.
                     properties:
-                      enabled:
+                      enable:
                         type: boolean
                     type: object
                   cloud:
@@ -75,16 +75,25 @@ spec:
                       enable:
                         type: boolean
                       server:
-                        description: Server is the MQTT broker address (host:port).
+                        description: |-
+                          Server is the MQTT broker address (host:port). Required when enable
+                          is true.
                         type: string
                     type: object
+                    x-kubernetes-validations:
+                    - message: server is required when enable is true
+                      rule: '!has(self.enable) || self.enable == false || (has(self.server)
+                        && self.server != '''')'
                   name:
-                    description: |-
-                      NameSection enables device-name management. The desired name comes from
-                      ShellyDevice spec.displayName, falling back to the fleet name-map
-                      ConfigMap (keyed by lowercased MAC, i.e. the ShellyDevice object name).
+                    description: NameSection enables device-name management.
                     properties:
                       managed:
+                        description: |-
+                          Managed enables name reconciliation for matching devices. The
+                          desired name is resolved from ShellyDevice spec.displayName,
+                          falling back to the fleet name-map ConfigMap (configurable via the
+                          operator's --name-map flag, default "shelly-names", keyed by
+                          lowercased MAC). false leaves the device name untouched.
                         type: boolean
                     required:
                     - managed
@@ -92,19 +101,23 @@ spec:
                   switch:
                     description: |-
                       SwitchSection applies to every switch component the device exposes
-                      (switch:0, switch:1, ...).
+                      (switch:0, switch:1, ...). Per-component overrides are not supported in
+                      v1alpha1; all switch components on a device receive the same declared
+                      values.
                     properties:
                       autoOff:
                         type: boolean
                       autoOffDelay:
                         description: AutoOffDelay in seconds.
                         format: int32
+                        minimum: 0
                         type: integer
                       autoOn:
                         type: boolean
                       autoOnDelay:
                         description: AutoOnDelay in seconds.
                         format: int32
+                        minimum: 0
                         type: integer
                       initialState:
                         description: InitialState is the output state after power-on.
@@ -118,6 +131,7 @@ spec:
                         description: PowerLimit in watts; the switch turns off above
                           it.
                         format: int32
+                        minimum: 0
                         type: integer
                     type: object
                   system:
@@ -143,8 +157,10 @@ spec:
               priority:
                 description: |-
                   Priority breaks ties when several profiles match a device: highest
-                  wins, then lexicographically smallest profile name.
+                  wins, then lexicographically smallest profile name. Omitted means
+                  priority 0.
                 format: int32
+                minimum: 0
                 type: integer
               selector:
                 description: |-

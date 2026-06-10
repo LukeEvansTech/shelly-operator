@@ -20,9 +20,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Profile modes.
 const (
+	// ModeObserve reports drift without correcting it.
 	ModeObserve = "observe"
+	// ModeEnforce reports and corrects drift. Until enforcement ships it
+	// behaves like observe plus an EnforcementPending event.
 	ModeEnforce = "enforce"
 )
 
@@ -37,7 +39,9 @@ type ShellyProfileSpec struct {
 	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 
 	// Priority breaks ties when several profiles match a device: highest
-	// wins, then lexicographically smallest profile name.
+	// wins, then lexicographically smallest profile name. Omitted means
+	// priority 0.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	Priority int32 `json:"priority,omitempty"`
 
@@ -81,18 +85,23 @@ type SystemSection struct {
 	EcoMode *bool `json:"ecoMode,omitempty"`
 }
 
-// NameSection enables device-name management. The desired name comes from
-// ShellyDevice spec.displayName, falling back to the fleet name-map
-// ConfigMap (keyed by lowercased MAC, i.e. the ShellyDevice object name).
+// NameSection enables device-name management.
 type NameSection struct {
+	// Managed enables name reconciliation for matching devices. The
+	// desired name is resolved from ShellyDevice spec.displayName,
+	// falling back to the fleet name-map ConfigMap (configurable via the
+	// operator's --name-map flag, default "shelly-names", keyed by
+	// lowercased MAC). false leaves the device name untouched.
 	Managed bool `json:"managed"`
 }
 
 // MQTTSection maps to the device's mqtt configuration.
+// +kubebuilder:validation:XValidation:rule="!has(self.enable) || self.enable == false || (has(self.server) && self.server != ”)",message="server is required when enable is true"
 type MQTTSection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`
-	// Server is the MQTT broker address (host:port).
+	// Server is the MQTT broker address (host:port). Required when enable
+	// is true.
 	// +optional
 	Server string `json:"server,omitempty"`
 }
@@ -108,11 +117,13 @@ type CloudSection struct {
 // with enforcement.
 type AuthSection struct {
 	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
+	Enable *bool `json:"enable,omitempty"`
 }
 
 // SwitchSection applies to every switch component the device exposes
-// (switch:0, switch:1, ...).
+// (switch:0, switch:1, ...). Per-component overrides are not supported in
+// v1alpha1; all switch components on a device receive the same declared
+// values.
 type SwitchSection struct {
 	// InitialState is the output state after power-on.
 	// +kubebuilder:validation:Enum=on;off;restore_last;match_input
@@ -121,14 +132,17 @@ type SwitchSection struct {
 	// +optional
 	AutoOn *bool `json:"autoOn,omitempty"`
 	// AutoOnDelay in seconds.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	AutoOnDelay *int32 `json:"autoOnDelay,omitempty"`
 	// +optional
 	AutoOff *bool `json:"autoOff,omitempty"`
 	// AutoOffDelay in seconds.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	AutoOffDelay *int32 `json:"autoOffDelay,omitempty"`
 	// PowerLimit in watts; the switch turns off above it.
+	// +kubebuilder:validation:Minimum=0
 	// +optional
 	PowerLimit *int32 `json:"powerLimit,omitempty"`
 }

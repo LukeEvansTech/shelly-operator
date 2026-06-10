@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
+	"github.com/LukeEvansTech/shelly-operator/internal/controller"
 	"github.com/LukeEvansTech/shelly-operator/internal/discovery"
 	// +kubebuilder:scaffold:imports
 )
@@ -90,6 +91,12 @@ func main() {
 		"Namespace where ShellyDevice objects are created.")
 	flag.DurationVar(&discoveryInterval, "discovery-interval", 5*time.Minute,
 		"Time between discovery sweeps.")
+	var nameMapName string
+	var reconcileInterval time.Duration
+	flag.StringVar(&nameMapName, "name-map", "shelly-names",
+		"ConfigMap (in each device's namespace) mapping lowercased MAC to desired device name. Empty disables name management.")
+	flag.DurationVar(&reconcileInterval, "reconcile-interval", 5*time.Minute,
+		"Steady-state drift check interval per device (jittered).")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -190,6 +197,18 @@ func main() {
 	}
 
 	// +kubebuilder:scaffold:builder
+
+	if err := (&controller.ShellyDeviceReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorderFor("shellydevice-controller"),
+		Reader:      mgr.GetAPIReader(),
+		NameMapName: nameMapName,
+		Interval:    reconcileInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ShellyDevice")
+		os.Exit(1)
+	}
 
 	if discoveryCIDRs != "" {
 		var sweepCIDRs []string

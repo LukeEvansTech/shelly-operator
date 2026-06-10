@@ -102,6 +102,7 @@ spec:
                 type: string
               gen:
                 description: Gen is the Shelly RPC API generation (2, 3, or 4).
+                format: int32
                 type: integer
               lastSeen:
                 description: LastSeen is when the device last answered a probe.

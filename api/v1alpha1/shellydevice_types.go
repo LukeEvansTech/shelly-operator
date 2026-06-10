@@ -63,7 +63,7 @@ type ShellyDeviceStatus struct {
 
 	// Gen is the Shelly RPC API generation (2, 3, or 4).
 	// +optional
-	Gen int `json:"gen,omitempty"`
+	Gen int32 `json:"gen,omitempty"`
 
 	// Firmware identifier, e.g. "20241011-114449/1.4.4-g6d2a586".
 	// +optional

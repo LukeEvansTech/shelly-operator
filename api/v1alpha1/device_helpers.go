@@ -47,10 +47,10 @@ func sanitizeLabelValue(s string) string {
 }
 
 // DeviceLabels returns the selector labels for a device's identity.
-func DeviceLabels(model, app string, gen int) map[string]string {
+func DeviceLabels(model, app string, gen int32) map[string]string {
 	return map[string]string{
 		LabelModel: sanitizeLabelValue(model),
 		LabelApp:   sanitizeLabelValue(app),
-		LabelGen:   strconv.Itoa(gen),
+		LabelGen:   strconv.Itoa(int(gen)),
 	}
 }

@@ -44,8 +44,8 @@ func probeAll(ctx context.Context, hc *http.Client, targets []string, concurrenc
 			defer wg.Done()
 			defer func() { <-sem }()
 			info, err := shelly.Probe(ctx, hc, target)
-			if err != nil || info.MAC == "" {
-				return // not a Shelly device (or gone); skip
+			if err != nil || info.MAC == "" || info.Gen < 2 {
+				return // unreachable, not a Shelly, or unsupported Gen1; skip
 			}
 			mu.Lock()
 			found = append(found, Found{Host: target, Info: info})

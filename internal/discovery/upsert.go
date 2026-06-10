@@ -23,7 +23,7 @@ import (
 // f.Info must be non-nil with a non-empty MAC; the prober guarantees this.
 func applyDevice(ctx context.Context, c client.Client, namespace string, now time.Time, f Found) error {
 	name := shellyv1alpha1.DeviceObjectName(f.Info.MAC)
-	labels := shellyv1alpha1.DeviceLabels(f.Info.Model, f.Info.App, f.Info.Gen)
+	labels := shellyv1alpha1.DeviceLabels(f.Info.Model, f.Info.App, int32(f.Info.Gen))
 
 	var dev shellyv1alpha1.ShellyDevice
 	err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &dev)
@@ -58,7 +58,7 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 	dev.Status.MAC = f.Info.MAC
 	dev.Status.Model = f.Info.Model
 	dev.Status.App = f.Info.App
-	dev.Status.Gen = f.Info.Gen
+	dev.Status.Gen = int32(f.Info.Gen)
 	dev.Status.Firmware = f.Info.Firmware
 	dev.Status.AuthEnabled = f.Info.AuthEnabled
 	dev.Status.DeviceName = f.Info.Name

@@ -16,15 +16,18 @@ func hostOf(url string) string { return strings.TrimPrefix(url, "http://") }
 func TestProbeAll(t *testing.T) {
 	d1 := &shellytest.Device{ID: "dev1", MAC: "AABBCCDDEE01", Model: "SNPL-00112UK", App: "PlusPlugUK", Gen: 2}
 	d2 := &shellytest.Device{ID: "dev2", MAC: "AABBCCDDEE02", Model: "SNSW-001P8EU", App: "Plus1PMMini", Gen: 2}
+	gen1 := &shellytest.Device{ID: "shelly1-aabbccddee99", MAC: "AABBCCDDEE99", Model: "SHSW-1", App: "switch", Gen: 1}
 	srv1, srv2 := shellytest.New(d1), shellytest.New(d2)
 	defer srv1.Close()
 	defer srv2.Close()
+	srvGen1 := shellytest.New(gen1)
+	defer srvGen1.Close()
 	// A live HTTP server that is not a Shelly device (returns 404).
 	notShelly := httptest.NewServer(http.HandlerFunc(http.NotFound))
 	defer notShelly.Close()
 
 	hc := &http.Client{Timeout: 5 * time.Second}
-	targets := []string{hostOf(srv1.URL), "127.0.0.1:1", hostOf(notShelly.URL), hostOf(srv2.URL)}
+	targets := []string{hostOf(srv1.URL), "127.0.0.1:1", hostOf(notShelly.URL), hostOf(srv2.URL), hostOf(srvGen1.URL)}
 	found := probeAll(context.Background(), hc, targets, 4)
 
 	if len(found) != 2 {

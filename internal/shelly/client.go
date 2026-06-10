@@ -95,7 +95,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 		}
 		return fmt.Errorf("shelly: %s %s: %w", method, c.host, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized {
 		return &AuthError{Host: c.host}
 	}
@@ -131,7 +131,7 @@ func (c *Client) post(ctx context.Context, payload []byte) (*http.Response, erro
 	}
 	challenge := resp.Header.Get("WWW-Authenticate")
 	_, _ = io.Copy(io.Discard, resp.Body) // drain so the retry reuses the connection
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err := c.setChallenge(challenge); err != nil {
 		return nil, err
 	}

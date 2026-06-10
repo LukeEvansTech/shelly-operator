@@ -23,7 +23,7 @@ func Probe(ctx context.Context, hc *http.Client, host string) (*DeviceInfo, erro
 	if err != nil {
 		return nil, fmt.Errorf("shelly: probe %s: %w", host, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("shelly: probe %s: unexpected status %s", host, resp.Status)
 	}

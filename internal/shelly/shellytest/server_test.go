@@ -17,7 +17,7 @@ func TestProbeEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var got map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestRPCSetConfigMergesAndRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %s", resp.Status)
 	}
@@ -64,7 +64,7 @@ func TestRPCUnknownMethodReturnsError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var rr struct {
 		Error *struct {
 			Code    int    `json:"code"`
@@ -89,7 +89,7 @@ func TestRPCSwitchSetConfigKeyedComponent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	cfg := d.ConfigSnapshot()
 	if cfg["switch:0"] == nil || cfg["switch:0"]["auto_off"] != true {
 		t.Errorf("switch:0 config = %v", cfg["switch:0"])
@@ -106,7 +106,7 @@ func TestRPCRejectsMissingAndWrongAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("missing auth: status = %s, want 401", resp.Status)
 	}
@@ -127,7 +127,7 @@ func TestRPCRejectsMissingAndWrongAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	if resp2.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("wrong password: status = %s, want 401", resp2.Status)
 	}

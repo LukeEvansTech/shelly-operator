@@ -28,7 +28,7 @@ func markStale(ctx context.Context, c client.Client, namespace string, cutoff ti
 	var errs []error
 	for i := range list.Items {
 		dev := &list.Items[i]
-		if !dev.Status.Online || dev.Status.LastSeen == nil || dev.Status.LastSeen.Time.After(cutoff) {
+		if !dev.Status.Online || dev.Status.LastSeen == nil || dev.Status.LastSeen.After(cutoff) {
 			continue
 		}
 		dev.Status.Online = false

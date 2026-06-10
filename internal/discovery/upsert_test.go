@@ -38,7 +38,7 @@ func TestApplyDeviceCreatesAndUpdates(t *testing.T) {
 	if dev.Status.Address != "10.32.8.38" || !dev.Status.Online || dev.Status.Firmware != "fw-1" {
 		t.Errorf("status = %+v", dev.Status)
 	}
-	if dev.Status.LastSeen == nil || dev.Status.LastSeen.Time.Unix() != now.Unix() {
+	if dev.Status.LastSeen == nil || dev.Status.LastSeen.Unix() != now.Unix() {
 		t.Errorf("lastSeen = %v, want %v", dev.Status.LastSeen, now)
 	}
 

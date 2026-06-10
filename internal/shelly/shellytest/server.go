@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -160,9 +161,7 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 // scalars/slices replaced), mirroring Shelly partial SetConfig semantics.
 func merge(dst, src map[string]any) map[string]any {
 	out := map[string]any{}
-	for k, v := range dst {
-		out[k] = v
-	}
+	maps.Copy(out, dst)
 	for k, v := range src {
 		if sm, ok := v.(map[string]any); ok {
 			dm, _ := out[k].(map[string]any) // nil dst -> pure recursive copy

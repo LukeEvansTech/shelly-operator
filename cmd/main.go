@@ -193,7 +193,7 @@ func main() {
 
 	if discoveryCIDRs != "" {
 		var sweepCIDRs []string
-		for _, c := range strings.Split(discoveryCIDRs, ",") {
+		for c := range strings.SplitSeq(discoveryCIDRs, ",") {
 			if c = strings.TrimSpace(c); c != "" {
 				sweepCIDRs = append(sweepCIDRs, c)
 			}

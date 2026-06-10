@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -46,9 +47,7 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 			if dev.Labels == nil {
 				dev.Labels = map[string]string{}
 			}
-			for k, v := range labels {
-				dev.Labels[k] = v
-			}
+			maps.Copy(dev.Labels, labels)
 			if err := c.Update(ctx, &dev); err != nil {
 				return fmt.Errorf("discovery: update labels %s: %w", name, err)
 			}

@@ -16,7 +16,7 @@ func TestCallWithDigestAuth(t *testing.T) {
 	defer srv.Close()
 
 	c := shelly.NewClient(hostOf(srv.URL), shelly.WithPassword("hunter2"))
-	for i := 0; i < 2; i++ { // second call must reuse the cached challenge
+	for i := range 2 { // second call must reuse the cached challenge
 		var got shelly.DeviceInfo
 		if err := c.Call(context.Background(), "Shelly.GetDeviceInfo", nil, &got); err != nil {
 			t.Fatalf("call %d: %v", i, err)
@@ -51,7 +51,7 @@ func TestCallConcurrentDigestAuth(t *testing.T) {
 	const n = 16
 	var wg sync.WaitGroup
 	errs := make([]error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -27,5 +28,26 @@ func TestDeviceLabels(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeviceLabels() = %v, want %v", got, want)
+	}
+}
+
+func TestSanitizeLabelValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"SNPL-00112UK", "SNPL-00112UK"},                          // clean value untouched
+		{"Plus Plug UK", "Plus_Plug_UK"},                          // space replaced
+		{"-weird.", "weird"},                                      // trimmed to alphanumeric edges
+		{strings.Repeat("a", 70), strings.Repeat("a", 63)},       // capped at 63
+	}
+	for _, c := range cases {
+		if got := sanitizeLabelValue(c.in); got != c.want {
+			t.Errorf("sanitizeLabelValue(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDeviceLabelsSanitizes(t *testing.T) {
+	got := DeviceLabels("Plus Plug", "App/Name", 2)
+	if got[LabelModel] != "Plus_Plug" || got[LabelApp] != "App_Name" {
+		t.Errorf("DeviceLabels() = %v", got)
 	}
 }

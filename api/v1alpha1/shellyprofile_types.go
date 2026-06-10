@@ -96,7 +96,7 @@ type NameSection struct {
 }
 
 // MQTTSection maps to the device's mqtt configuration.
-// +kubebuilder:validation:XValidation:rule="!has(self.enable) || self.enable == false || (has(self.server) && self.server != ”)",message="server is required when enable is true"
+// +kubebuilder:validation:XValidation:rule=”!has(self.enable) || self.enable == false || (has(self.server) && size(self.server) > 0)”,message=”server is required when enable is true”
 type MQTTSection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`

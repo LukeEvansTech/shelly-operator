@@ -84,6 +84,19 @@ type ShellyDeviceStatus struct {
 	// LastSeen is when the device last answered a probe.
 	// +optional
 	LastSeen *metav1.Time `json:"lastSeen,omitempty"`
+
+	// MatchedProfile is the ShellyProfile currently governing this device.
+	// +optional
+	MatchedProfile string `json:"matchedProfile,omitempty"`
+
+	// DriftedSections lists config sections that differ from the matched
+	// profile (empty when in sync).
+	// +optional
+	DriftedSections []string `json:"driftedSections,omitempty"`
+
+	// Conditions describe the device's reconciliation state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -93,6 +106,7 @@ type ShellyDeviceStatus struct {
 // +kubebuilder:printcolumn:name="Device Name",type=string,JSONPath=`.status.deviceName`
 // +kubebuilder:printcolumn:name="Online",type=boolean,JSONPath=`.status.online`
 // +kubebuilder:printcolumn:name="Last Seen",type=date,JSONPath=`.status.lastSeen`
+// +kubebuilder:printcolumn:name="In Sync",type=string,JSONPath=`.status.conditions[?(@.type=="InSync")].status`
 
 // ShellyDevice represents one discovered Shelly Gen2+ device. Objects are
 // created and maintained by the discovery sweeper (named by lowercased

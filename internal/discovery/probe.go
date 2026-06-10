@@ -1,0 +1,50 @@
+package discovery
+
+import (
+	"context"
+	"net/http"
+	"sync"
+
+	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
+)
+
+// Found is one device that answered a probe during a sweep.
+type Found struct {
+	Host string // host[:port] the device answered at
+	Info *shelly.DeviceInfo
+}
+
+// probeAll probes every target with bounded concurrency and returns the
+// devices that answered. Unreachable and non-Shelly targets are skipped
+// silently — on a subnet sweep most addresses won't answer.
+func probeAll(ctx context.Context, hc *http.Client, targets []string, concurrency int) []Found {
+	if concurrency < 1 {
+		concurrency = 32
+	}
+	var (
+		mu    sync.Mutex
+		found []Found
+		wg    sync.WaitGroup
+		sem   = make(chan struct{}, concurrency)
+	)
+	for _, target := range targets {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(target string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			info, err := shelly.Probe(ctx, hc, target)
+			if err != nil || info.MAC == "" {
+				return // not a Shelly device (or gone); skip
+			}
+			mu.Lock()
+			found = append(found, Found{Host: target, Info: info})
+			mu.Unlock()
+		}(target)
+	}
+	wg.Wait()
+	return found
+}

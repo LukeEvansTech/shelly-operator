@@ -29,7 +29,7 @@ func TestRenderSections(t *testing.T) {
 		Name:   &shellyv1alpha1.NameSection{Managed: true},
 		MQTT:   &shellyv1alpha1.MQTTSection{Enable: ptr(true), Server: "mqtt:1883"},
 		Cloud:  &shellyv1alpha1.CloudSection{Enable: ptr(false)},
-		Switch: &shellyv1alpha1.SwitchSection{InitialState: ptr("restore_last"), AutoOff: ptr(true), AutoOffDelay: ptr(int32(300)), PowerLimit: ptr(int32(2300))},
+		Switch: &shellyv1alpha1.SwitchSection{InitialState: ptr("restore_last"), AutoOn: ptr(false), AutoOnDelay: ptr(int32(5)), AutoOff: ptr(true), AutoOffDelay: ptr(int32(300)), PowerLimit: ptr(int32(2300))},
 	}
 	actual := rawConfig(t, map[string]any{
 		"sys":      map[string]any{},
@@ -43,8 +43,8 @@ func TestRenderSections(t *testing.T) {
 		"sys":      {"device": map[string]any{"eco_mode": true, "name": "rack-pdu"}},
 		"mqtt":     {"enable": true, "server": "mqtt:1883"},
 		"cloud":    {"enable": false},
-		"switch:0": {"initial_state": "restore_last", "auto_off": true, "auto_off_delay": float64(300), "power_limit": float64(2300)},
-		"switch:1": {"initial_state": "restore_last", "auto_off": true, "auto_off_delay": float64(300), "power_limit": float64(2300)},
+		"switch:0": {"initial_state": "restore_last", "auto_on": false, "auto_on_delay": float64(5), "auto_off": true, "auto_off_delay": float64(300), "power_limit": float64(2300)},
+		"switch:1": {"initial_state": "restore_last", "auto_on": false, "auto_on_delay": float64(5), "auto_off": true, "auto_off_delay": float64(300), "power_limit": float64(2300)},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Render() =\n%#v\nwant\n%#v", got, want)

@@ -15,6 +15,8 @@ import (
 // actual is consulted only to discover which switch components exist.
 // Auth is deliberately not rendered: auth state is not part of
 // Shelly.GetConfig; the controller diffs it against status.authEnabled.
+// A nil pointer field within a section is likewise unmanaged and produces
+// no output.
 func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[string]json.RawMessage) map[string]map[string]any {
 	out := map[string]map[string]any{}
 
@@ -34,6 +36,8 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		if cfg.MQTT.Enable != nil {
 			m["enable"] = *cfg.MQTT.Enable
 		}
+		// Server renders independently of Enable so the broker address can
+		// be pre-configured while MQTT remains disabled.
 		if cfg.MQTT.Server != "" {
 			m["server"] = cfg.MQTT.Server
 		}
@@ -69,7 +73,11 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		if len(sw) > 0 {
 			for comp := range actual {
 				if strings.HasPrefix(comp, "switch:") {
-					out[comp] = sw
+					cp := make(map[string]any, len(sw))
+					for k, v := range sw {
+						cp[k] = v
+					}
+					out[comp] = cp
 				}
 			}
 		}

@@ -1,0 +1,9 @@
+apiVersion: shelly.thirdimpact.io/v1alpha1
+kind: ShellyDevice
+metadata:
+  labels:
+    app.kubernetes.io/name: shelly-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: shellydevice-sample
+spec:
+  # TODO(user): Add fields here

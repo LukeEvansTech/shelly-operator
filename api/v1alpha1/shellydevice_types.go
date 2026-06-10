@@ -33,9 +33,10 @@ type ShellyDeviceSpec struct {
 	// +optional
 	DisplayName string `json:"displayName,omitempty"`
 
-	// ProfileRef pins this device to a named ShellyProfile, bypassing
-	// selector matching. (Consumed by the device controller in a later
-	// plan.)
+	// ProfileRef pins this device to a ShellyProfile by object name (same
+	// namespace), bypassing selector matching. (Consumed by the device
+	// controller in a later plan.)
+	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	ProfileRef string `json:"profileRef,omitempty"`
 }
@@ -51,6 +52,8 @@ type ShellyDeviceStatus struct {
 	// +optional
 	MAC string `json:"mac,omitempty"`
 
+	// Model is the device model identifier as reported by the device,
+	// e.g. "SNPL-00112UK".
 	// +optional
 	Model string `json:"model,omitempty"`
 
@@ -58,9 +61,9 @@ type ShellyDeviceStatus struct {
 	// +optional
 	App string `json:"app,omitempty"`
 
-	// Generation of the device API (2, 3, 4).
+	// Gen is the Shelly RPC API generation (2, 3, or 4).
 	// +optional
-	Generation int `json:"generation,omitempty"`
+	Gen int `json:"gen,omitempty"`
 
 	// Firmware identifier, e.g. "20241011-114449/1.4.4-g6d2a586".
 	// +optional

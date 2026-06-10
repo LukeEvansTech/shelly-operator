@@ -71,9 +71,10 @@ spec:
                 type: boolean
               profileRef:
                 description: |-
-                  ProfileRef pins this device to a named ShellyProfile, bypassing
-                  selector matching. (Consumed by the device controller in a later
-                  plan.)
+                  ProfileRef pins this device to a ShellyProfile by object name (same
+                  namespace), bypassing selector matching. (Consumed by the device
+                  controller in a later plan.)
+                maxLength: 253
                 type: string
             type: object
           status:
@@ -99,8 +100,8 @@ spec:
               firmware:
                 description: Firmware identifier, e.g. "20241011-114449/1.4.4-g6d2a586".
                 type: string
-              generation:
-                description: Generation of the device API (2, 3, 4).
+              gen:
+                description: Gen is the Shelly RPC API generation (2, 3, or 4).
                 type: integer
               lastSeen:
                 description: LastSeen is when the device last answered a probe.
@@ -110,6 +111,9 @@ spec:
                 description: MAC as reported by the device (uppercase hex, no separators).
                 type: string
               model:
+                description: |-
+                  Model is the device model identifier as reported by the device,
+                  e.g. "SNPL-00112UK".
                 type: string
               online:
                 description: Online is true while the device answers discovery sweeps.

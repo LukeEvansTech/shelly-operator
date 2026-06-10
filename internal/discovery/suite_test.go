@@ -1,0 +1,63 @@
+package discovery
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
+)
+
+// k8sClient talks to the envtest API server started in TestMain. Tests
+// that don't need Kubernetes still run under the same TestMain; the
+// envtest startup cost is paid once per package.
+var k8sClient client.Client
+
+func TestMain(m *testing.M) {
+	testEnv := &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+	}
+	cfg, err := testEnv.Start()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "envtest start (run via `make test` so KUBEBUILDER_ASSETS is set):", err)
+		os.Exit(1)
+	}
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := shellyv1alpha1.AddToScheme(scheme); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "client:", err)
+		_ = testEnv.Stop()
+		os.Exit(1)
+	}
+	code := m.Run()
+	_ = testEnv.Stop()
+	os.Exit(code)
+}
+
+// newNamespace creates a fresh namespace so each test is isolated.
+func newNamespace(t *testing.T) string {
+	t.Helper()
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "disc-"}}
+	if err := k8sClient.Create(context.Background(), ns); err != nil {
+		t.Fatal(err)
+	}
+	return ns.Name
+}

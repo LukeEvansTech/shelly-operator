@@ -150,8 +150,3 @@ func (c *Client) send(ctx context.Context, payload []byte, authHeader string) (*
 	return c.hc.Do(req)
 }
 
-// Stubs replaced by digest.go in the next task.
-type digestState struct{}
-
-func (c *Client) authHeader() string          { return "" }
-func (c *Client) setChallenge(h string) error { return &AuthError{Host: c.host} }

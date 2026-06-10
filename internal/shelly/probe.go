@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -30,5 +31,6 @@ func Probe(ctx context.Context, hc *http.Client, host string) (*DeviceInfo, erro
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil, fmt.Errorf("shelly: probe %s: decode: %w", host, err)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so the connection returns to the pool
 	return &info, nil
 }

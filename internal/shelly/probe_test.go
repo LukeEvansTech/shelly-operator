@@ -2,6 +2,8 @@ package shelly_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -40,5 +42,15 @@ func TestProbeUnreachable(t *testing.T) {
 	defer cancel()
 	if _, err := shelly.Probe(ctx, nil, "127.0.0.1:1"); err == nil {
 		t.Error("expected error for unreachable host")
+	}
+}
+
+func TestProbeNonShellyServer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	if _, err := shelly.Probe(context.Background(), nil, hostOf(srv.URL)); err == nil {
+		t.Error("expected error for non-Shelly 404 response")
 	}
 }

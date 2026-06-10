@@ -11,5 +11,5 @@ type DeviceInfo struct {
 	Firmware    string `json:"fw_id"`
 	App         string `json:"app"`
 	AuthEnabled bool   `json:"auth_en"`
-	Name        string `json:"name"` // empty if unset (device returns null)
+	Name        string `json:"name"` // "" when device returns null or omits the field
 }

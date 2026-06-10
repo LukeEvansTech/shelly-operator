@@ -81,9 +81,9 @@ spec:
                         type: string
                     type: object
                     x-kubernetes-validations:
-                    - message: ”server is required when enable is true”
-                      rule: ”!has(self.enable) || self.enable == false || (has(self.server)
-                        && size(self.server) > 0)”
+                    - message: server is required when enable is true
+                      rule: '!has(self.enable) || self.enable == false || (has(self.server)
+                        && size(self.server) > 0)'
                   name:
                     description: NameSection enables device-name management.
                     properties:

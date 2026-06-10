@@ -149,4 +149,3 @@ func (c *Client) send(ctx context.Context, payload []byte, authHeader string) (*
 	}
 	return c.hc.Do(req)
 }
-

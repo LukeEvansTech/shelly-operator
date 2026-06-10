@@ -9,7 +9,8 @@ read-only dashboard.
 
 Status: early development. Currently implemented: `internal/shelly` RPC
 client (probe, JSON-RPC call, SHA-256 digest auth, config get/set) with a
-fake-device test server.
+fake-device test server; `ShellyDevice` CRD (`shelly.thirdimpact.io/v1alpha1`)
+and the subnet-sweep discovery sweeper (`--discovery-cidrs`).
 
 ## Description
 

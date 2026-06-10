@@ -33,10 +33,10 @@ func TestDeviceLabels(t *testing.T) {
 
 func TestSanitizeLabelValue(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"SNPL-00112UK", "SNPL-00112UK"},                          // clean value untouched
-		{"Plus Plug UK", "Plus_Plug_UK"},                          // space replaced
-		{"-weird.", "weird"},                                      // trimmed to alphanumeric edges
-		{strings.Repeat("a", 70), strings.Repeat("a", 63)},       // capped at 63
+		{"SNPL-00112UK", "SNPL-00112UK"},                   // clean value untouched
+		{"Plus Plug UK", "Plus_Plug_UK"},                   // space replaced
+		{"-weird.", "weird"},                               // trimmed to alphanumeric edges
+		{strings.Repeat("a", 70), strings.Repeat("a", 63)}, // capped at 63
 	}
 	for _, c := range cases {
 		if got := sanitizeLabelValue(c.in); got != c.want {

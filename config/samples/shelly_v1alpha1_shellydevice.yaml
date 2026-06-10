@@ -1,9 +1,10 @@
+# ShellyDevice objects are normally created by the discovery sweeper and
+# named by lowercased MAC. Users only set spec fields, e.g. to pause
+# management or pin a profile.
 apiVersion: shelly.thirdimpact.io/v1alpha1
 kind: ShellyDevice
 metadata:
-  labels:
-    app.kubernetes.io/name: shelly-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: shellydevice-sample
+  name: 3c8a1fec8e3c
 spec:
-  # TODO(user): Add fields here
+  displayName: office-desk
+  paused: false

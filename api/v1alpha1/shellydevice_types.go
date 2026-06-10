@@ -98,7 +98,7 @@ type ShellyDeviceStatus struct {
 // created and maintained by the discovery sweeper (named by lowercased
 // MAC); humans only edit spec.
 type ShellyDevice struct {
-	metav1.TypeMeta `json:",inline"`
+	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   ShellyDeviceSpec   `json:"spec,omitempty"`

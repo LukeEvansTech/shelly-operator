@@ -8,6 +8,10 @@ import (
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
 )
 
+// defaultProbeConcurrency bounds simultaneous probes when the caller
+// doesn't specify a limit.
+const defaultProbeConcurrency = 32
+
 // Found is one device that answered a probe during a sweep.
 type Found struct {
 	Host string // host[:port] the device answered at
@@ -17,9 +21,12 @@ type Found struct {
 // probeAll probes every target with bounded concurrency and returns the
 // devices that answered. Unreachable and non-Shelly targets are skipped
 // silently — on a subnet sweep most addresses won't answer.
+// On context cancellation it returns the partial results gathered so far;
+// callers must not treat absence from the result as evidence a device is
+// gone.
 func probeAll(ctx context.Context, hc *http.Client, targets []string, concurrency int) []Found {
 	if concurrency < 1 {
-		concurrency = 32
+		concurrency = defaultProbeConcurrency
 	}
 	var (
 		mu    sync.Mutex

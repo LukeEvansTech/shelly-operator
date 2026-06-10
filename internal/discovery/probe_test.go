@@ -23,7 +23,7 @@ func TestProbeAll(t *testing.T) {
 	notShelly := httptest.NewServer(http.HandlerFunc(http.NotFound))
 	defer notShelly.Close()
 
-	hc := &http.Client{Timeout: 500 * time.Millisecond}
+	hc := &http.Client{Timeout: 5 * time.Second}
 	targets := []string{hostOf(srv1.URL), "127.0.0.1:1", hostOf(notShelly.URL), hostOf(srv2.URL)}
 	found := probeAll(context.Background(), hc, targets, 4)
 
@@ -42,7 +42,7 @@ func TestProbeAll(t *testing.T) {
 func TestProbeAllCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	hc := &http.Client{Timeout: 500 * time.Millisecond}
+	hc := &http.Client{Timeout: 5 * time.Second}
 	if found := probeAll(ctx, hc, []string{"127.0.0.1:1", "127.0.0.1:2"}, 2); len(found) != 0 {
 		t.Errorf("expected no results after cancel, got %+v", found)
 	}

@@ -32,7 +32,7 @@ const (
 type ShellyProfileSpec struct {
 	// Selector matches ShellyDevices by their discovery labels
 	// (shelly.thirdimpact.io/model, /app, /gen). A nil selector matches no
-	// devices — such a profile applies only via ShellyDevice
+	// devices -- such a profile applies only via ShellyDevice
 	// spec.profileRef. An empty non-nil selector matches every device in
 	// the namespace.
 	// +optional
@@ -46,9 +46,9 @@ type ShellyProfileSpec struct {
 	Priority int32 `json:"priority,omitempty"`
 
 	// Mode controls whether drift is only reported (observe) or also
-	// corrected on the device (enforce). Enforcement ships in a later
-	// release; until then enforce behaves like observe and the controller
-	// records an EnforcementPending event.
+	// corrected by writing the drifted sections to the device (enforce).
+	// Enforcement applies safest-first and auth last; failures surface on
+	// the InSync condition with reason ApplyFailed.
 	// +kubebuilder:validation:Enum=observe;enforce
 	// +kubebuilder:default=observe
 	// +optional
@@ -112,12 +112,25 @@ type CloudSection struct {
 	Enable *bool `json:"enable,omitempty"`
 }
 
-// AuthSection declares whether device auth must be enabled. Drift is
-// observed against the device's reported auth_en; password rollout ships
-// with enforcement.
+// AuthSection declares whether device auth must be enabled, and where the
+// admin password lives.
 type AuthSection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`
+
+	// PasswordSecretRef names a Secret (same namespace) and key holding
+	// the device admin password. Required to enforce enable=true, and
+	// used to authenticate to devices that already have auth enabled.
+	// +optional
+	PasswordSecretRef *SecretKeyRef `json:"passwordSecretRef,omitempty"`
+}
+
+// SecretKeyRef points at a key within a Secret in the same namespace.
+type SecretKeyRef struct {
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
 }
 
 // SwitchSection applies to every switch component the device exposes

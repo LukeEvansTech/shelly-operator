@@ -19,4 +19,10 @@ const (
 	// controller does not have yet (password support ships with
 	// enforcement).
 	ReasonAuthRequired = "AuthRequired"
+	// ReasonApplyFailed: enforcement wrote to the device and a section
+	// apply failed; earlier sections may have been applied.
+	ReasonApplyFailed = "ApplyFailed"
+	// ReasonCredentialsError: the profile references a password Secret
+	// that cannot be read (missing Secret/key or API error).
+	ReasonCredentialsError = "CredentialsError"
 )

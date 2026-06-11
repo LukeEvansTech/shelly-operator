@@ -144,10 +144,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if profile.Spec.Mode == shellyv1alpha1.ModeEnforce && len(findings) > 0 && !dev.Spec.Paused { // defense-in-depth; paused returns earlier
 		var enforceResult ctrl.Result
+		var enforceErr error
 		var done bool
-		findings, enforceResult, done = r.runEnforce(ctx, c, &dev, profile, desired, desiredName, password, findings, warns)
+		findings, enforceResult, enforceErr, done = r.runEnforce(ctx, c, &dev, profile, desired, desiredName, password, findings, warns)
 		if done {
-			return enforceResult, nil
+			return enforceResult, enforceErr
 		}
 	}
 
@@ -179,40 +180,48 @@ func appendAuthFinding(profile *shellyv1alpha1.ShellyProfile, fs []drift.Finding
 
 // runEnforce is the enforcement gate inside Reconcile. It handles damping,
 // delegates to enforceAndRecheck, and detects non-convergence. It returns the
-// (possibly updated) findings plus a terminal ctrl.Result and done=true when
-// Reconcile should return immediately; done=false means enforcement completed
-// normally and the caller should continue with the (possibly updated) findings.
+// (possibly updated) findings, a terminal ctrl.Result, any status-patch error,
+// and done=true when Reconcile should return immediately; done=false means
+// enforcement completed normally and the caller should continue with the
+// (possibly updated) findings.
 func (r *ShellyDeviceReconciler) runEnforce(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
 	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
 	desiredName, password string, findings []drift.Finding, warns []string,
-) ([]drift.Finding, ctrl.Result, bool) {
-	// Damping: if the previous cycle already wrote these exact sections
-	// and they came back unchanged, don't rewrite device flash every
-	// cycle. Any change in the diff (external fix, profile edit) re-arms
-	// enforcement.
+) ([]drift.Finding, ctrl.Result, error, bool) {
+	// Damping: if the previous cycle already wrote these exact sections and
+	// values and they came back unchanged, don't rewrite device flash every
+	// cycle. The comparison is against the full drift summary stored in the
+	// condition message -- any changed want/have value re-arms enforcement
+	// even when the drifted section set is identical. Note: Summarize lists
+	// at most 5 findings, so changes only beyond the 5th finding may not
+	// re-arm (acceptable).
 	if prev := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync); prev != nil &&
 		prev.Reason == shellyv1alpha1.ReasonNotConverging &&
-		slices.Equal(drift.Sections(findings), dev.Status.DriftedSections) {
-		res, _ := r.finish(ctx, dev, metav1.ConditionFalse, shellyv1alpha1.ReasonNotConverging,
+		prev.Message == withWarnings(drift.Summarize(findings), warns) {
+		res, err := r.finish(ctx, dev, metav1.ConditionFalse, shellyv1alpha1.ReasonNotConverging,
 			withWarnings(drift.Summarize(findings), warns), findings, profile.Name)
-		return findings, res, true
+		return findings, res, err, true
 	}
 
 	var applyErr error
 	var applied []string
-	findings, applied, applyErr = r.enforceAndRecheck(ctx, c, dev, profile, desired, desiredName, password, findings, dev.Status.AuthEnabled)
+	var authNow bool
+	findings, applied, authNow, applyErr = r.enforceAndRecheck(ctx, c, dev, profile, desired, desiredName, password, findings, dev.Status.AuthEnabled)
 	if applyErr != nil {
 		var rerr *recheckError
 		if errors.As(applyErr, &rerr) {
-			res, _ := r.finish(ctx, dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+			res, err := r.finish(ctx, dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
 				withWarnings(applyErr.Error(), warns), nil, profile.Name)
-			return findings, res, true
+			return findings, res, err, true
 		}
-		res, _ := r.finish(ctx, dev, metav1.ConditionFalse, shellyv1alpha1.ReasonApplyFailed,
+		res, err := r.finish(ctx, dev, metav1.ConditionFalse, shellyv1alpha1.ReasonApplyFailed,
 			withWarnings(fmt.Sprintf("enforcing drifted config: %v", applyErr), warns), findings, profile.Name)
-		return findings, res, true
+		return findings, res, err, true
 	}
+	// Persist the fresh auth state so pre-sweep reconciles don't re-issue
+	// SetAuth; the discovery sweeper will confirm it on its next pass.
+	dev.Status.AuthEnabled = authNow
 	// Detect non-convergence: any post-recheck finding whose section was
 	// just written means the device reverted or clamped our write.
 	for _, f := range findings {
@@ -221,22 +230,23 @@ func (r *ShellyDeviceReconciler) runEnforce(
 				r.Recorder.Event(dev, corev1.EventTypeWarning, "EnforcementNotConverging",
 					"device still reports drift in sections that were just written")
 			}
-			res, _ := r.finish(ctx, dev, metav1.ConditionFalse, shellyv1alpha1.ReasonNotConverging,
+			res, err := r.finish(ctx, dev, metav1.ConditionFalse, shellyv1alpha1.ReasonNotConverging,
 				withWarnings(drift.Summarize(findings), warns), findings, profile.Name)
-			return findings, res, true
+			return findings, res, err, true
 		}
 	}
-	return findings, ctrl.Result{}, false
+	return findings, ctrl.Result{}, nil, false
 }
 
 // enforceAndRecheck applies all drifted sections to the device and then
 // re-fetches config to verify the apply succeeded. It returns the updated
-// findings, the sections that were written, and any apply/recheck error.
+// findings, the sections that were written, the fresh auth-enabled state,
+// and any apply/recheck error.
 func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
 	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
 	desiredName, password string, findings []drift.Finding, authNow bool,
-) ([]drift.Finding, []string, error) {
+) ([]drift.Finding, []string, bool, error) {
 	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), password)
 	if len(res.applied) > 0 && r.Recorder != nil {
 		r.Recorder.Event(dev, corev1.EventTypeNormal, "DriftCorrected",
@@ -247,7 +257,7 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 			"a configuration change requires a device restart to take effect")
 	}
 	if applyErr != nil {
-		return findings, res.applied, applyErr
+		return findings, res.applied, authNow, applyErr
 	}
 	// Track auth state locally: status.authEnabled is stale until next sweep.
 	for _, s := range res.applied {
@@ -260,15 +270,15 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	c = r.deviceClient(dev.Status.Address, password)
 	actual, err := c.GetConfig(ctx)
 	if err != nil {
-		return nil, res.applied, &recheckError{err: fmt.Errorf("re-checking after enforcement: %w", err)}
+		return nil, res.applied, authNow, &recheckError{err: fmt.Errorf("re-checking after enforcement: %w", err)}
 	}
 	desired = drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err = drift.Diff(desired, actual)
 	if err != nil {
-		return nil, res.applied, &recheckError{err: fmt.Errorf("parsing device config after enforcement: %w", err)}
+		return nil, res.applied, authNow, &recheckError{err: fmt.Errorf("parsing device config after enforcement: %w", err)}
 	}
 	findings = appendAuthFinding(profile, findings, authNow)
-	return findings, res.applied, nil
+	return findings, res.applied, authNow, nil
 }
 
 // finish records the reconcile outcome on status, emits an Event when the

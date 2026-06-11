@@ -16,8 +16,8 @@ const (
 	ReasonPaused            = "Paused"
 	ReasonConfigFetchFailed = "ConfigFetchFailed"
 	// ReasonAuthRequired: the device requires digest auth credentials the
-	// controller does not have yet (password support ships with
-	// enforcement).
+	// controller does not have yet (configure
+	// spec.config.auth.passwordSecretRef).
 	ReasonAuthRequired = "AuthRequired"
 	// ReasonApplyFailed: enforcement wrote to the device and a section
 	// apply failed; earlier sections may have been applied.

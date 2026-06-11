@@ -740,6 +740,85 @@ func TestEnforceNonConvergenceDamping(t *testing.T) {
 	}
 }
 
+func ptrInt32(v int32) *int32 { return &v }
+
+func TestEnforceDampingRearmsOnValueChange(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev32", MAC: "AABBCCDDEE3C", Gen: 2, IgnoreSetConfig: true, InitialConfig: map[string]map[string]any{
+		"switch:0": {"auto_off_delay": float64(0)},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE3C", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Switch: &shellyv1alpha1.SwitchSection{AutoOffDelay: ptrInt32(300)},
+	})
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee3c") // first cycle: writes, NotConverging
+	countWrites := func() int {
+		n := 0
+		for _, call := range fake.RecordedCalls() {
+			if strings.Contains(call.Method, "SetConfig") {
+				n++
+			}
+		}
+		return n
+	}
+	w1 := countWrites()
+	_ = reconcile(t, r, ns, "aabbccddee3c") // damped
+	if countWrites() != w1 {
+		t.Fatal("second cycle should be damped")
+	}
+
+	// Operator changes the desired value -> damper must re-arm.
+	var p shellyv1alpha1.ShellyProfile
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: "plugs"}, &p); err != nil {
+		t.Fatal(err)
+	}
+	p.Spec.Config.Switch.AutoOffDelay = ptrInt32(600)
+	if err := k8sClient.Update(context.Background(), &p); err != nil {
+		t.Fatal(err)
+	}
+	_ = reconcile(t, r, ns, "aabbccddee3c")
+	if countWrites() == w1 {
+		t.Error("value change must re-arm enforcement (new write expected)")
+	}
+}
+
+func TestEnforceSwitchConfig(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev33", MAC: "AABBCCDDEE3D", Gen: 2, InitialConfig: map[string]map[string]any{
+		"switch:0": {"auto_off": false, "auto_off_delay": float64(0)},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE3D", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Switch: &shellyv1alpha1.SwitchSection{AutoOff: boolPtr(true), AutoOffDelay: ptrInt32(300)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee3d")
+	cfg := fake.ConfigSnapshot()["switch:0"]
+	if cfg["auto_off"] != true || cfg["auto_off_delay"] != float64(300) {
+		t.Errorf("switch:0 not enforced: %v", cfg)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want True", cond)
+	}
+	sawSwitchSet := false
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "Switch.SetConfig" {
+			sawSwitchSet = true
+		}
+	}
+	if !sawSwitchSet {
+		t.Error("expected Switch.SetConfig call")
+	}
+}
+
 func TestNameManagedButUnresolvableWarns(t *testing.T) {
 	ns := newNamespace(t)
 	fake := &shellytest.Device{ID: "dev27", MAC: "AABBCCDDEE37", Gen: 2}

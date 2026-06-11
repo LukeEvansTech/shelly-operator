@@ -62,7 +62,7 @@ type ShellyProfileSpec struct {
 
 // ProfileConfig declares desired device configuration. Every section is
 // optional; omitted sections and omitted fields within a section are
-// unmanaged. Secret-backed fields (passwords) ship with enforcement.
+// unmanaged. Passwords are read from Secrets via auth.passwordSecretRef.
 type ProfileConfig struct {
 	// +optional
 	System *SystemSection `json:"system,omitempty"`

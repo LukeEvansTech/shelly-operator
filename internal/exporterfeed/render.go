@@ -4,7 +4,7 @@
 package exporterfeed
 
 import (
-	"sort"
+	"slices"
 
 	"sigs.k8s.io/yaml"
 
@@ -39,7 +39,8 @@ func RenderConfig(devs []shellyv1alpha1.ShellyDevice, opts Options) (string, err
 			hosts = append(hosts, devs[i].Status.Address)
 		}
 	}
-	sort.Strings(hosts)
+	slices.Sort(hosts)
+	hosts = slices.Compact(hosts)
 	cfg := exporterConfig{
 		ListenAddress:        opts.ListenAddress,
 		Debug:                opts.Debug,

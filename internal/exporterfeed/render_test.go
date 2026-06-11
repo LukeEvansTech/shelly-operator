@@ -48,3 +48,17 @@ func TestRenderConfigEmptyFleet(t *testing.T) {
 		t.Errorf("empty fleet must render an empty devices list:\n%s", got)
 	}
 }
+
+func TestRenderConfigDedupesAddresses(t *testing.T) {
+	devs := []shellyv1alpha1.ShellyDevice{
+		feedDev("a", "10.32.8.10", true),
+		feedDev("b", "10.32.8.10", true),
+	}
+	got, err := RenderConfig(devs, Options{ListenAddress: ":8080", DeviceUpdateInterval: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(got, "10.32.8.10") != 1 {
+		t.Errorf("duplicate addresses must collapse:\n%s", got)
+	}
+}

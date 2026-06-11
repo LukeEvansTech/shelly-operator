@@ -604,6 +604,41 @@ func TestAuthEnabledDeviceUsesProfilePassword(t *testing.T) {
 	}
 }
 
+func TestEnforceRecheckFailureIsNotApplyFailed(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev28", MAC: "AABBCCDDEE38", Gen: 2, GetConfigErrorAfter: 1, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE38", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r, rec := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee38")
+
+	// The write itself succeeded...
+	if got := fake.ConfigSnapshot()["sys"]["device"].(map[string]any)["eco_mode"]; got != true {
+		t.Errorf("device eco_mode = %v, want true (apply succeeded)", got)
+	}
+	// ...so the verification failure must NOT be reported as ApplyFailed.
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != shellyv1alpha1.ReasonConfigFetchFailed {
+		t.Fatalf("condition = %+v, want Unknown/ConfigFetchFailed", cond)
+	}
+	foundCorrected := false
+	for len(rec.Events) > 0 {
+		if e := <-rec.Events; strings.Contains(e, "DriftCorrected") {
+			foundCorrected = true
+		}
+	}
+	if !foundCorrected {
+		t.Error("DriftCorrected event must still fire for the successful writes")
+	}
+}
+
 func TestNameManagedButUnresolvableWarns(t *testing.T) {
 	ns := newNamespace(t)
 	fake := &shellytest.Device{ID: "dev27", MAC: "AABBCCDDEE37", Gen: 2}

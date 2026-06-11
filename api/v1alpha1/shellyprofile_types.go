@@ -23,8 +23,8 @@ import (
 const (
 	// ModeObserve reports drift without correcting it.
 	ModeObserve = "observe"
-	// ModeEnforce reports and corrects drift. Until enforcement ships it
-	// behaves like observe plus an EnforcementPending event.
+	// ModeEnforce reports drift and corrects it by writing the drifted
+	// sections to the device, safest-first with auth last.
 	ModeEnforce = "enforce"
 )
 

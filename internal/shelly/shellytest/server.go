@@ -53,11 +53,17 @@ type Device struct {
 	// New copies this into the internal config store.
 	InitialConfig map[string]map[string]any
 
+	// GetConfigErrorAfter, when > 0, fails Shelly.GetConfig calls after
+	// the first N successful ones (simulates a device that answers the
+	// initial read but dies before verification).
+	GetConfigErrorAfter int
+
 	mu             sync.Mutex
 	ha1            string
 	config         map[string]map[string]any // component ("sys", "switch:0") -> config
 	calls          []Call                    // recorded RPC calls, in order
 	challengesSent int                       // number of 401 challenges issued
+	getConfigCalls int                       // number of successful Shelly.GetConfig calls served
 }
 
 // Call records one RPC invocation that passed auth.
@@ -159,6 +165,11 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 	case req.Method == "Shelly.GetDeviceInfo":
 		writeJSON(w, rpcResult(req.ID, d.deviceInfo()))
 	case req.Method == "Shelly.GetConfig":
+		if d.GetConfigErrorAfter > 0 && d.getConfigCalls >= d.GetConfigErrorAfter {
+			writeJSON(w, rpcError(req.ID, -108, "config read failed"))
+			return
+		}
+		d.getConfigCalls++
 		writeJSON(w, rpcResult(req.ID, d.config))
 	case req.Method == "Shelly.SetAuth":
 		var p struct {

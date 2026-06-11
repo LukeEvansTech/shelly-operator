@@ -141,6 +141,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		var applyErr error
 		findings, _, applyErr = r.enforceAndRecheck(ctx, c, &dev, profile, desired, desiredName, password, findings, dev.Status.AuthEnabled)
 		if applyErr != nil {
+			var rerr *recheckError
+			if errors.As(applyErr, &rerr) {
+				return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+					withWarnings(applyErr.Error(), warns), nil, profile.Name)
+			}
 			return r.finish(ctx, &dev, metav1.ConditionFalse, shellyv1alpha1.ReasonApplyFailed,
 				withWarnings(fmt.Sprintf("enforcing drifted config: %v", applyErr), warns), findings, profile.Name)
 		}
@@ -153,6 +158,14 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return r.finish(ctx, &dev, metav1.ConditionFalse, shellyv1alpha1.ReasonDrifted,
 		withWarnings(drift.Summarize(findings), warns), findings, profile.Name)
 }
+
+// recheckError marks a failure that happened AFTER all device writes
+// succeeded (post-apply verification read). It must not be reported as
+// ApplyFailed -- the device converged; only the verification failed.
+type recheckError struct{ err error }
+
+func (e *recheckError) Error() string { return e.err.Error() }
+func (e *recheckError) Unwrap() error { return e.err }
 
 // enforceAndRecheck applies all drifted sections to the device and then
 // re-fetches config to verify the apply succeeded. It returns the updated
@@ -192,12 +205,12 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	c = r.deviceClient(dev.Status.Address, password)
 	actual, err := c.GetConfig(ctx)
 	if err != nil {
-		return nil, authNow, fmt.Errorf("re-checking after enforcement: %w", err)
+		return nil, authNow, &recheckError{err: fmt.Errorf("re-checking after enforcement: %w", err)}
 	}
 	desired = drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err = drift.Diff(desired, actual)
 	if err != nil {
-		return nil, authNow, fmt.Errorf("parsing device config after enforcement: %w", err)
+		return nil, authNow, &recheckError{err: fmt.Errorf("parsing device config after enforcement: %w", err)}
 	}
 	findings = appendAuthFinding(findings, authNow)
 	return findings, authNow, nil

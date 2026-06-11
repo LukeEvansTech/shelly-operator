@@ -40,6 +40,26 @@ so `--discovery-cidrs` must cover BOTH the old and new subnets for the
 duration of the migration. See
 `config/samples/shelly_v1alpha1_shellyprofile.yaml` for a worked example.
 
+## Install (Helm)
+
+The chart and image are published to GHCR on each release:
+
+```sh
+helm install shelly-operator oci://ghcr.io/lukeevanstech/charts/shelly-operator \
+  --version 0.1.0 \
+  --namespace shelly-operator --create-namespace \
+  --set 'discovery.cidrs={10.32.8.0/24}'
+```
+
+Key values (see `charts/shelly-operator/values.yaml` for the full list):
+
+- `discovery.cidrs`: IPv4 subnets swept for Shelly devices. Empty list
+  disables discovery.
+- `exporterConfigMap`: name of the ConfigMap rendered as a device-list
+  feed for shelly_exporter. Empty string disables the feed.
+- `dashboard.enabled` / `dashboard.bind`: the read-only dashboard
+  (default on, `:8090`).
+
 ## Getting Started
 
 ### Prerequisites

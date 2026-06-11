@@ -116,13 +116,3 @@ func render(w http.ResponseWriter, t *template.Template, data any) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
-
-// handleDevice and handleProfiles are implemented in detail.go (next
-// task); these stubs keep the mux routable.
-func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented yet", http.StatusNotImplemented)
-}
-
-func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented yet", http.StatusNotImplemented)
-}

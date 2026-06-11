@@ -1,0 +1,9 @@
+{{define "content"}}
+<h1>Profiles</h1>
+<table>
+<tr><th>Profile</th><th>Mode</th><th>Priority</th><th>Matched</th></tr>
+{{range .Profiles}}
+<tr><td>{{.Name}}</td><td>{{.Mode}}</td><td>{{.Priority}}</td><td>{{.Matched}} device{{if ne .Matched 1}}s{{end}}</td></tr>
+{{end}}
+</table>
+{{end}}

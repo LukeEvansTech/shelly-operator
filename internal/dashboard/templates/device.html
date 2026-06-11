@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>{{.Object}}{{if .Name}} <span class="muted">({{.Name}})</span>{{end}}</h1>
+<p>
+<span class="pill {{if .Online}}ok{{else}}bad{{end}}">{{if .Online}}online{{else}}offline{{end}}</span>
+<span class="pill {{.SyncClass}}">{{.Sync}}</span>
+{{if .Profile}}profile: <a href="/profiles">{{.Profile}}</a>{{else}}<span class="muted">no profile</span>{{end}}
+</p>
+<p class="muted">{{.Model}} | gen {{.Gen}} | {{.Address}} | fw {{.Firmware}}</p>
+{{if .Message}}<p>{{.Message}}</p>{{end}}
+{{if .Findings}}
+<h2>Drift</h2>
+<table><tr><th>Section</th><th>Path</th><th>Want</th><th>Have</th></tr>
+{{range .Findings}}<tr><td>{{.Section}}</td><td>{{.Path}}</td><td>{{.Want}}</td><td>{{.Have}}</td></tr>{{end}}
+</table>
+{{end}}
+{{if .Desired}}
+<h2>Desired (rendered from profile)</h2>
+<pre>{{.Desired}}</pre>
+{{end}}
+{{if .Actual}}
+<h2>Actual device config <span class="muted">(secrets redacted)</span></h2>
+<pre>{{.Actual}}</pre>
+{{end}}
+{{end}}

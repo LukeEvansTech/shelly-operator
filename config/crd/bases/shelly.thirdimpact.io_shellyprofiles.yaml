@@ -239,6 +239,10 @@ spec:
                           rule: '!has(self.enable) || self.enable == false || (has(self.ssid)
                             && size(self.ssid) > 0)'
                     type: object
+                    x-kubernetes-validations:
+                    - message: sta and sta1 must not declare the same ssid
+                      rule: '!has(self.sta) || !has(self.sta1) || !has(self.sta.ssid)
+                        || !has(self.sta1.ssid) || self.sta.ssid != self.sta1.ssid'
                 type: object
               mode:
                 default: observe

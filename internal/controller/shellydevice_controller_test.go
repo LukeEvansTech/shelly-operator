@@ -1015,6 +1015,46 @@ func TestObserveNeverWritesWifi(t *testing.T) {
 	}
 }
 
+func TestProfileRejectsSharedStaSta1SSID(t *testing.T) {
+	ns := newNamespace(t)
+	ctx := context.Background()
+	dup := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "dup-ssid"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Mode: shellyv1alpha1.ModeObserve,
+			Config: shellyv1alpha1.ProfileConfig{
+				Wifi: &shellyv1alpha1.WifiSection{
+					Sta:  &shellyv1alpha1.WifiNetwork{SSID: "same-net"},
+					Sta1: &shellyv1alpha1.WifiNetwork{SSID: "same-net"},
+				},
+			},
+		},
+	}
+	err := k8sClient.Create(ctx, dup)
+	if err == nil {
+		t.Fatal("expected create to be rejected when sta and sta1 share an ssid")
+	}
+	if !strings.Contains(err.Error(), "must not declare the same ssid") {
+		t.Errorf("error = %v, want message about shared ssid", err)
+	}
+
+	ok := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "distinct-ssid"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Mode: shellyv1alpha1.ModeObserve,
+			Config: shellyv1alpha1.ProfileConfig{
+				Wifi: &shellyv1alpha1.WifiSection{
+					Sta:  &shellyv1alpha1.WifiNetwork{SSID: "iot-new"},
+					Sta1: &shellyv1alpha1.WifiNetwork{SSID: "iot-old"},
+				},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, ok); err != nil {
+		t.Fatalf("profile with distinct ssids should be accepted: %v", err)
+	}
+}
+
 func TestNameManagedButUnresolvableWarns(t *testing.T) {
 	ns := newNamespace(t)
 	fake := &shellytest.Device{ID: "dev27", MAC: "AABBCCDDEE37", Gen: 2}

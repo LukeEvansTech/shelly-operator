@@ -172,6 +172,7 @@ type SwitchSection struct {
 // passwords, so password drift is undetectable -- passwords are injected
 // at apply time whenever a network's section is written for another
 // reason (ssid or enable drift).
+// +kubebuilder:validation:XValidation:rule="!has(self.sta) || !has(self.sta1) || !has(self.sta.ssid) || !has(self.sta1.ssid) || self.sta.ssid != self.sta1.ssid",message="sta and sta1 must not declare the same ssid"
 type WifiSection struct {
 	// Sta is the primary client network.
 	// +optional

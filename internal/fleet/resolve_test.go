@@ -88,6 +88,71 @@ func TestResolveNameDisabled(t *testing.T) {
 	}
 }
 
+func TestResolveWifiPasswords(t *testing.T) {
+	r := stubReader{secrets: map[string]*corev1.Secret{
+		"wifi-creds": {Data: map[string][]byte{"new": []byte("hunter2"), "old": []byte("legacy")}},
+	}}
+
+	t.Run("nil section resolves empty", func(t *testing.T) {
+		got, err := ResolveWifiPasswords(context.Background(), r, "ns", nil)
+		if err != nil || got != (WifiPasswords{}) {
+			t.Fatalf("got %+v, err %v", got, err)
+		}
+	})
+
+	t.Run("both networks resolve", func(t *testing.T) {
+		w := &shellyv1alpha1.WifiSection{
+			Sta:  &shellyv1alpha1.WifiNetwork{PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi-creds", Key: "new"}},
+			Sta1: &shellyv1alpha1.WifiNetwork{PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi-creds", Key: "old"}},
+		}
+		got, err := ResolveWifiPasswords(context.Background(), r, "ns", w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Sta != "hunter2" || got.Sta1 != "legacy" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("network without ref resolves empty", func(t *testing.T) {
+		w := &shellyv1alpha1.WifiSection{Sta: &shellyv1alpha1.WifiNetwork{SSID: "open-net"}}
+		got, err := ResolveWifiPasswords(context.Background(), r, "ns", w)
+		if err != nil || got.Sta != "" {
+			t.Fatalf("got %+v, err %v", got, err)
+		}
+	})
+
+	t.Run("missing key is an error", func(t *testing.T) {
+		w := &shellyv1alpha1.WifiSection{
+			Sta: &shellyv1alpha1.WifiNetwork{PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi-creds", Key: "nope"}},
+		}
+		_, err := ResolveWifiPasswords(context.Background(), r, "ns", w)
+		if err == nil || !strings.Contains(err.Error(), `no key "nope"`) {
+			t.Fatalf("want missing-key error, got %v", err)
+		}
+	})
+
+	t.Run("missing secret is an error", func(t *testing.T) {
+		w := &shellyv1alpha1.WifiSection{
+			Sta1: &shellyv1alpha1.WifiNetwork{PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "absent", Key: "k"}},
+		}
+		_, err := ResolveWifiPasswords(context.Background(), r, "ns", w)
+		if err == nil {
+			t.Fatal("want error for missing secret")
+		}
+	})
+
+	t.Run("nil reader resolves empty", func(t *testing.T) {
+		w := &shellyv1alpha1.WifiSection{
+			Sta: &shellyv1alpha1.WifiNetwork{PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi-creds", Key: "new"}},
+		}
+		got, err := ResolveWifiPasswords(context.Background(), nil, "ns", w)
+		if err != nil || got != (WifiPasswords{}) {
+			t.Fatalf("got %+v, err %v", got, err)
+		}
+	})
+}
+
 func TestResolvePassword(t *testing.T) {
 	auth := &shellyv1alpha1.AuthSection{PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "creds", Key: "password"}}
 	r := stubReader{secrets: map[string]*corev1.Secret{"creds": {Data: map[string][]byte{"password": []byte("hunter2")}}}}

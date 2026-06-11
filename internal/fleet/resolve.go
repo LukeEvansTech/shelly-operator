@@ -1,5 +1,6 @@
 // Package fleet holds resolution helpers shared by the device controller
-// and the dashboard: desired device names and admin passwords.
+// and the dashboard: desired device names, admin passwords, and wifi
+// network passwords.
 package fleet
 
 import (
@@ -44,14 +45,48 @@ func ResolvePassword(ctx context.Context, reader client.Reader, namespace string
 	if auth == nil || auth.PasswordSecretRef == nil || reader == nil {
 		return "", nil
 	}
-	ref := auth.PasswordSecretRef
+	return secretValue(ctx, reader, namespace, auth.PasswordSecretRef, "password")
+}
+
+// WifiPasswords holds resolved WiFi network passwords ("" = none declared).
+type WifiPasswords struct {
+	Sta  string
+	Sta1 string
+}
+
+// ResolveWifiPasswords resolves the wifi section's network passwords from
+// their Secret refs. Networks without a passSecretRef resolve to "". Read
+// failures are errors -- a configured ref that cannot be read must not
+// silently degrade to "no password".
+func ResolveWifiPasswords(ctx context.Context, reader client.Reader, namespace string, wifi *shellyv1alpha1.WifiSection) (WifiPasswords, error) {
+	var out WifiPasswords
+	if wifi == nil || reader == nil {
+		return out, nil
+	}
+	var err error
+	if wifi.Sta != nil && wifi.Sta.PassSecretRef != nil {
+		if out.Sta, err = secretValue(ctx, reader, namespace, wifi.Sta.PassSecretRef, "wifi sta password"); err != nil {
+			return WifiPasswords{}, err
+		}
+	}
+	if wifi.Sta1 != nil && wifi.Sta1.PassSecretRef != nil {
+		if out.Sta1, err = secretValue(ctx, reader, namespace, wifi.Sta1.PassSecretRef, "wifi sta1 password"); err != nil {
+			return WifiPasswords{}, err
+		}
+	}
+	return out, nil
+}
+
+// secretValue reads one key from a Secret. what names the value in errors
+// ("password", "wifi sta password", ...).
+func secretValue(ctx context.Context, reader client.Reader, namespace string, ref *shellyv1alpha1.SecretKeyRef, what string) (string, error) {
 	var secret corev1.Secret
 	if err := reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
-		return "", fmt.Errorf("reading password secret %s/%s: %w", namespace, ref.Name, err)
+		return "", fmt.Errorf("reading %s secret %s/%s: %w", what, namespace, ref.Name, err)
 	}
-	pw, ok := secret.Data[ref.Key]
+	v, ok := secret.Data[ref.Key]
 	if !ok {
-		return "", fmt.Errorf("password secret %s/%s has no key %q", namespace, ref.Name, ref.Key)
+		return "", fmt.Errorf("%s secret %s/%s has no key %q", what, namespace, ref.Name, ref.Key)
 	}
-	return string(pw), nil
+	return string(v), nil
 }

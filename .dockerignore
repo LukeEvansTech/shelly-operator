@@ -9,3 +9,6 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include assets embedded via go:embed
+!internal/dashboard/templates/*.html

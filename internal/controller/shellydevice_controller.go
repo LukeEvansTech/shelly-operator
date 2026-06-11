@@ -40,7 +40,7 @@ import (
 // ShellyDeviceReconciler matches each ShellyDevice to a ShellyProfile,
 // reports drift on the InSync condition, and (for enforce-mode profiles)
 // corrects it by writing drifted sections to the device, safest-first
-// with auth last.
+// with auth second-to-last and wifi dead last.
 type ShellyDeviceReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -141,7 +141,9 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		var enforceResult ctrl.Result
 		var enforceErr error
 		var done bool
-		findings, enforceResult, enforceErr, done = r.runEnforce(ctx, c, &dev, profile, desired, desiredName, password, findings, warns)
+		// Wifi passwords are not resolved yet; the zero value means no
+		// passwords are injected into wifi writes for now.
+		findings, enforceResult, enforceErr, done = r.runEnforce(ctx, c, &dev, profile, desired, desiredName, password, fleet.WifiPasswords{}, findings, warns)
 		if done {
 			return enforceResult, enforceErr
 		}
@@ -182,7 +184,7 @@ func appendAuthFinding(profile *shellyv1alpha1.ShellyProfile, fs []drift.Finding
 func (r *ShellyDeviceReconciler) runEnforce(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
 	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
-	desiredName, password string, findings []drift.Finding, warns []string,
+	desiredName, password string, wifiPw fleet.WifiPasswords, findings []drift.Finding, warns []string,
 ) ([]drift.Finding, ctrl.Result, error, bool) {
 	// Damping: if the previous cycle already wrote these exact sections and
 	// values and they came back unchanged, don't rewrite device flash every
@@ -202,7 +204,7 @@ func (r *ShellyDeviceReconciler) runEnforce(
 	var applyErr error
 	var applied []string
 	var authNow bool
-	findings, applied, authNow, applyErr = r.enforceAndRecheck(ctx, c, dev, profile, desired, desiredName, password, findings, dev.Status.AuthEnabled)
+	findings, applied, authNow, applyErr = r.enforceAndRecheck(ctx, c, dev, profile, desired, desiredName, password, wifiPw, findings, dev.Status.AuthEnabled)
 	if applyErr != nil {
 		var rerr *recheckError
 		if errors.As(applyErr, &rerr) {
@@ -240,9 +242,9 @@ func (r *ShellyDeviceReconciler) runEnforce(
 func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
 	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
-	desiredName, password string, findings []drift.Finding, authNow bool,
+	desiredName, password string, wifiPw fleet.WifiPasswords, findings []drift.Finding, authNow bool,
 ) ([]drift.Finding, []string, bool, error) {
-	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), password)
+	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), password, wifiPw)
 	if len(res.applied) > 0 && r.Recorder != nil {
 		r.Recorder.Event(dev, corev1.EventTypeNormal, "DriftCorrected",
 			fmt.Sprintf("applied sections: %s", strings.Join(res.applied, ", ")))

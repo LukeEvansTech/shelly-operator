@@ -20,3 +20,10 @@ spec:
       server: mqtt.svc.cluster.local:1883
     switch:
       initialState: restore_last
+    # Enforcement example: flip mode to "enforce" and declare auth to roll
+    # out digest passwords fleet-wide (password read from a Secret).
+    # auth:
+    #   enable: true
+    #   passwordSecretRef:
+    #     name: shelly-device-admin
+    #     key: password

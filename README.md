@@ -8,12 +8,13 @@ JSON-RPC API, a device-list ConfigMap feed for
 read-only dashboard.
 
 Status: early development. Currently implemented: `internal/shelly` RPC
-client (probe, JSON-RPC, SHA-256 digest auth, config get/set) with a
-fake-device test server; `ShellyDevice` CRD and subnet-sweep discovery
-(`--discovery-cidrs`); `ShellyProfile` CRD with observe-mode drift
-detection (InSync condition, drift Events, fleet name map via
-`--name-map`). Enforcement (writing config to devices) is not implemented
-yet.
+client (probe, JSON-RPC, SHA-256 digest auth, config get/set, SetAuth)
+with a fake-device test server; `ShellyDevice` CRD and subnet-sweep
+discovery (`--discovery-cidrs`); `ShellyProfile` CRD with drift detection
+and enforce-mode correction (safest-first apply, auth password rollout
+from Secrets, non-convergence damping, restart/failure reporting via
+Events and the InSync condition). Wifi management, MQTT credentials, and
+firmware updates are not implemented.
 
 ## Description
 

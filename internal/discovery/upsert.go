@@ -16,7 +16,7 @@ import (
 
 // applyDevice records a probe result as a ShellyDevice: creates the object
 // on first sight, refreshes selector labels if identity changed, and
-// updates the discovery-owned status fields. Spec is never touched — it
+// updates the discovery-owned status fields. Spec is never touched -- it
 // belongs to users. Status fields owned by other controllers (e.g. future
 // conditions) are deliberately left alone, which is why fields are set
 // individually rather than replacing the whole struct.

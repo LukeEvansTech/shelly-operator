@@ -90,7 +90,7 @@ func (s *Sweeper) init() error {
 
 // RunOnce performs a single sweep: probe all targets, upsert answers,
 // mark long-unseen devices offline. Per-device errors are joined, not
-// fatal — one bad device must not stop the sweep.
+// fatal -- one bad device must not stop the sweep.
 // Not safe to call concurrently with Start.
 func (s *Sweeper) RunOnce(ctx context.Context) error {
 	if err := s.init(); err != nil {

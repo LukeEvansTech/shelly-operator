@@ -18,7 +18,7 @@ import (
 // LastSeen itself is preserved so operators can see when a device
 // disappeared. A resourceVersion conflict means the device changed after
 // we listed (most likely refreshed by this very sweep), so flipping it
-// offline would be wrong — conflicts are skipped, not errors; the next
+// offline would be wrong -- conflicts are skipped, not errors; the next
 // sweep re-evaluates.
 func markStale(ctx context.Context, c client.Client, namespace string, cutoff time.Time) error {
 	var list shellyv1alpha1.ShellyDeviceList

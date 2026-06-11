@@ -20,7 +20,7 @@ type Found struct {
 
 // probeAll probes every target with bounded concurrency and returns the
 // devices that answered. Unreachable and non-Shelly targets are skipped
-// silently — on a subnet sweep most addresses won't answer.
+// silently -- on a subnet sweep most addresses won't answer.
 // On context cancellation it returns the partial results gathered so far;
 // callers must not treat absence from the result as evidence a device is
 // gone.

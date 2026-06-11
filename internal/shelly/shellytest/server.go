@@ -38,14 +38,22 @@ type Device struct {
 	Gen      int
 	Firmware string
 	Name     string
-	Password string // "" = auth disabled
+	Password string // "" = auth disabled at start; seeds ha1 in New
+
+	// RestartOnSetConfig makes every *.SetConfig response report
+	// restart_required=true.
+	RestartOnSetConfig bool
+	// SetConfigError, when non-empty, fails every *.SetConfig call with
+	// this message (simulates a device rejecting config).
+	SetConfigError string
 
 	// InitialConfig seeds the per-component config the device starts with.
-	// Keys are component names ("sys", "switch:0", …); values are config maps.
+	// Keys are component names ("sys", "switch:0", ...); values are config maps.
 	// New copies this into the internal config store.
 	InitialConfig map[string]map[string]any
 
 	mu             sync.Mutex
+	ha1            string
 	config         map[string]map[string]any // component ("sys", "switch:0") -> config
 	calls          []Call                    // recorded RPC calls, in order
 	challengesSent int                       // number of 401 challenges issued
@@ -62,6 +70,9 @@ func New(d *Device) *httptest.Server {
 	d.config = make(map[string]map[string]any, len(d.InitialConfig))
 	for comp, cfg := range d.InitialConfig {
 		d.config[comp] = merge(nil, cfg)
+	}
+	if d.Password != "" {
+		d.ha1 = sha256hex("admin:" + d.ID + ":" + d.Password)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /shelly", d.handleProbe)
@@ -94,6 +105,14 @@ func (d *Device) Challenges() int {
 	return d.challengesSent
 }
 
+// AuthEnabled reports whether the device currently requires digest auth.
+func (d *Device) AuthEnabled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.ha1 != ""
+}
+
+// deviceInfo builds the /shelly identity map. callers must hold d.mu.
 func (d *Device) deviceInfo() map[string]any {
 	var name any
 	if d.Name != "" {
@@ -101,19 +120,22 @@ func (d *Device) deviceInfo() map[string]any {
 	}
 	return map[string]any{
 		"id": d.ID, "mac": d.MAC, "model": d.Model, "gen": d.Gen,
-		"fw_id": d.Firmware, "app": d.App, "auth_en": d.Password != "", "name": name,
+		"fw_id": d.Firmware, "app": d.App, "auth_en": d.ha1 != "", "name": name,
 	}
 }
 
 func (d *Device) handleProbe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, d.deviceInfo()) // probe never requires auth, like real devices
+	d.mu.Lock()
+	info := d.deviceInfo()
+	d.mu.Unlock()
+	writeJSON(w, info) // probe never requires auth, like real devices
 }
 
 func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.Password != "" && !d.authorized(r) {
+	if d.ha1 != "" && !d.authorized(r) {
 		d.challengesSent++
 		w.Header().Set("WWW-Authenticate",
 			fmt.Sprintf(`Digest qop="auth", realm=%q, nonce=%q, algorithm=SHA-256`, d.ID, testNonce))
@@ -137,7 +159,27 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, rpcResult(req.ID, d.deviceInfo()))
 	case req.Method == "Shelly.GetConfig":
 		writeJSON(w, rpcResult(req.ID, d.config))
+	case req.Method == "Shelly.SetAuth":
+		var p struct {
+			User  string  `json:"user"`
+			Realm string  `json:"realm"`
+			HA1   *string `json:"ha1"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.User != "admin" || p.Realm != d.ID {
+			writeJSON(w, rpcError(req.ID, -103, "invalid SetAuth params"))
+			return
+		}
+		if p.HA1 == nil {
+			d.ha1 = ""
+		} else {
+			d.ha1 = *p.HA1
+		}
+		writeJSON(w, rpcResult(req.ID, nil))
 	case strings.HasSuffix(req.Method, ".SetConfig"):
+		if d.SetConfigError != "" {
+			writeJSON(w, rpcError(req.ID, -114, d.SetConfigError))
+			return
+		}
 		comp := strings.ToLower(strings.TrimSuffix(req.Method, ".SetConfig"))
 		var p struct {
 			ID     *int           `json:"id"`
@@ -151,7 +193,7 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 			comp = fmt.Sprintf("%s:%d", comp, *p.ID)
 		}
 		d.config[comp] = merge(d.config[comp], p.Config)
-		writeJSON(w, rpcResult(req.ID, map[string]any{"restart_required": false}))
+		writeJSON(w, rpcResult(req.ID, map[string]any{"restart_required": d.RestartOnSetConfig}))
 	default:
 		writeJSON(w, rpcError(req.ID, 404, "No handler for "+req.Method))
 	}
@@ -185,7 +227,7 @@ func (d *Device) authorized(r *http.Request) bool {
 	if f["username"] != "admin" || f["realm"] != d.ID || f["nonce"] != testNonce || f["uri"] != r.RequestURI {
 		return false
 	}
-	ha1 := sha256hex("admin:" + f["realm"] + ":" + d.Password)
+	ha1 := d.ha1
 	ha2 := sha256hex(r.Method + ":" + f["uri"])
 	want := sha256hex(strings.Join([]string{ha1, f["nonce"], f["nc"], f["cnonce"], "auth", ha2}, ":"))
 	return f["response"] != "" && f["response"] == want

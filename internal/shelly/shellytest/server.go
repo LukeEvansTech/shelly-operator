@@ -29,7 +29,8 @@ const testNonce = "testnonce1"
 // Device is the mutable state behind a fake Shelly device. Populate the
 // identity fields and InitialConfig, then pass it to New. Do not modify any
 // field after New returns. Inspect runtime state via RecordedCalls,
-// ConfigSnapshot, and Challenges.
+// ConfigSnapshot, Challenges, and AuthEnabled. RestartOnSetConfig and
+// SetConfigError are optional knobs, set before New.
 type Device struct {
 	ID       string
 	MAC      string
@@ -166,6 +167,10 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 			HA1   *string `json:"ha1"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.User != "admin" || p.Realm != d.ID {
+			writeJSON(w, rpcError(req.ID, -103, "invalid SetAuth params"))
+			return
+		}
+		if p.HA1 != nil && *p.HA1 == "" {
 			writeJSON(w, rpcError(req.ID, -103, "invalid SetAuth params"))
 			return
 		}

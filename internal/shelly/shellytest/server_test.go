@@ -168,7 +168,7 @@ func TestSetAuthEnableAndReject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("SetAuth status = %s", resp.Status)
 	}
@@ -180,7 +180,7 @@ func TestSetAuthEnableAndReject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	if resp2.StatusCode != http.StatusUnauthorized {
 		t.Errorf("post-SetAuth unauthenticated status = %s, want 401", resp2.Status)
 	}
@@ -189,7 +189,7 @@ func TestSetAuthEnableAndReject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp3.Body.Close()
+	defer func() { _ = resp3.Body.Close() }()
 	var info map[string]any
 	if err := json.NewDecoder(resp3.Body).Decode(&info); err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestSetConfigRestartAndErrorKnobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var rr struct {
 		Result struct {
 			RestartRequired bool `json:"restart_required"`
@@ -229,7 +229,7 @@ func TestSetConfigRestartAndErrorKnobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	var er struct {
 		Error *struct {
 			Message string `json:"message"`

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "shelly-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "shelly-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "shelly-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- if .Values.reloader }}
+      annotations:
+        reloader.stakater.com/auto: "true"
+      {{- end }}
+      labels:
+        {{- include "shelly-operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "shelly-operator.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+            {{- with .Values.discovery.cidrs }}
+            - --discovery-cidrs={{ join "," . }}
+            {{- end }}
+            - --discovery-interval={{ .Values.discovery.interval }}
+            - --device-namespace={{ .Values.deviceNamespace | default .Release.Namespace }}
+            {{- /* Binary defaults --name-map to "shelly-names"; pass the value
+                   unconditionally so nameMap="" becomes an explicit-empty flag,
+                   which disables the name map. */}}
+            - --name-map={{ .Values.nameMap }}
+            - --reconcile-interval={{ .Values.reconcileInterval }}
+            {{- with .Values.exporterConfigMap }}
+            - --exporter-configmap={{ . }}
+            {{- end }}
+            {{- /* Binary defaults --dashboard-bind to ":8090"; explicit-empty
+                   disables the dashboard. */}}
+            {{- if .Values.dashboard.enabled }}
+            - --dashboard-bind={{ .Values.dashboard.bind }}
+            {{- else }}
+            - --dashboard-bind=
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address=:8080
+            - --metrics-secure=false
+            {{- end }}
+          ports:
+            - containerPort: 8081
+              name: health
+              protocol: TCP
+            {{- if .Values.dashboard.enabled }}
+            - containerPort: 8090
+              name: dashboard
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.metrics.enabled }}
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

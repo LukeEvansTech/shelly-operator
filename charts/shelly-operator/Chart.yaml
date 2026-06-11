@@ -1,0 +1,11 @@
+apiVersion: v2
+name: shelly-operator
+description: "Kubernetes operator for Shelly Gen2+ devices: subnet-sweep discovery, declarative profiles with drift detection/enforcement, prometheus-exporter feed, read-only dashboard"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/LukeEvansTech/shelly-operator
+sources:
+  - https://github.com/LukeEvansTech/shelly-operator
+maintainers:
+  - name: LukeEvansTech

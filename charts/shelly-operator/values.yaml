@@ -1,0 +1,61 @@
+# Default values for shelly-operator.
+
+image:
+  # Container image repository for the operator.
+  repository: ghcr.io/lukeevanstech/shelly-operator
+  # Image tag. Empty defaults to .Chart.AppVersion.
+  tag: ""
+  # Image pull policy.
+  pullPolicy: IfNotPresent
+
+# Number of manager replicas. Leader election is always enabled, so values
+# above 1 give hot standbys rather than horizontal scaling.
+replicas: 1
+
+# Subnets swept for Shelly devices. Empty list disables discovery.
+discovery:
+  # IPv4 CIDRs to sweep, e.g. ["10.32.8.0/24"]. Empty list disables discovery.
+  cidrs: []
+  # Time between discovery sweeps.
+  interval: 5m
+
+# Namespace ShellyDevice objects are created in. "" = the release namespace.
+deviceNamespace: ""
+
+# ConfigMap mapping lowercased MAC -> desired device name. "" disables.
+nameMap: shelly-names
+# Steady-state drift check interval per device (jittered).
+reconcileInterval: 5m
+# ConfigMap the operator renders for shelly_exporter. "" disables the feed.
+exporterConfigMap: ""
+
+dashboard:
+  # Serve the read-only dashboard.
+  enabled: true
+  # Listen address for the dashboard. NOTE (v0 simplification): the container
+  # and Service ports are hardcoded to 8090, so the port here must stay 8090
+  # unless you also adjust the Deployment/Service port templates.
+  bind: ":8090"
+
+metrics:
+  # When true the manager serves plain-HTTP /metrics on :8080.
+  enabled: false
+serviceMonitor:
+  # Create a Prometheus Operator ServiceMonitor. Requires metrics.enabled.
+  enabled: false
+
+# Pod resource requests/limits for the manager container.
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# stakater Reloader opt-in annotation on the pod template.
+reloader: true
+
+# Standard scheduling controls for the manager pod.
+nodeSelector: {}
+tolerations: []
+affinity: {}

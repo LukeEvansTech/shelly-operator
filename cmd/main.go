@@ -40,6 +40,7 @@ import (
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/controller"
 	"github.com/LukeEvansTech/shelly-operator/internal/discovery"
+	"github.com/LukeEvansTech/shelly-operator/internal/exporterfeed"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -97,6 +98,9 @@ func main() {
 		"ConfigMap mapping lowercased MAC to device name. Empty disables.")
 	flag.DurationVar(&reconcileInterval, "reconcile-interval", 5*time.Minute,
 		"Steady-state drift check interval per device (jittered).")
+	var exporterConfigMap string
+	flag.StringVar(&exporterConfigMap, "exporter-configmap", "",
+		"ConfigMap (in --device-namespace) to maintain with shelly_exporter's config.yaml. Empty disables the feed.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -208,6 +212,23 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ShellyDevice")
 		os.Exit(1)
+	}
+
+	if exporterConfigMap != "" {
+		if err := (&exporterfeed.Reconciler{
+			Client:        mgr.GetClient(),
+			Namespace:     deviceNamespace,
+			ConfigMapName: exporterConfigMap,
+			Options: exporterfeed.Options{
+				ListenAddress:        ":8080",
+				DeviceUpdateInterval: 30,
+			},
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "ExporterFeed")
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("exporter feed disabled: no --exporter-configmap configured")
 	}
 
 	if discoveryCIDRs != "" {

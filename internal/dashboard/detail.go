@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"regexp"
 	"sort"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -76,7 +76,10 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 		c := shelly.NewClient(dev.Status.Address, opts...)
 		if actual, err := c.GetConfig(ctx); err == nil {
 			desired := drift.Render(profile.Spec.Config, name, actual)
-			if findings, err := drift.Diff(desired, actual); err == nil {
+			findings, diffErr := drift.Diff(desired, actual)
+			if diffErr != nil {
+				view.Message = fmt.Sprintf("diff failed: %v", diffErr)
+			} else {
 				view.Findings = findings
 			}
 			view.Desired = mustJSON(desired)
@@ -133,22 +136,39 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	render(w, profilesTmpl, map[string]any{"Profiles": rows})
 }
 
+// secretKeyPattern matches config keys whose values must never render.
+// Over-redaction is harmless on a read-only display; future firmware may
+// add fields we have not seen.
+var secretKeyPattern = regexp.MustCompile(`(?i)pass|token|secret|key`)
+
 // redactSecrets returns a deep copy of m with values of secret-looking
-// keys (containing "pass") replaced. The input is not mutated.
+// keys replaced, recursing into nested maps and arrays. The input is not
+// mutated.
 func redactSecrets(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		if sub, ok := v.(map[string]any); ok {
-			out[k] = redactSecrets(sub)
-			continue
-		}
-		if strings.Contains(strings.ToLower(k), "pass") && v != nil {
+		if secretKeyPattern.MatchString(k) && v != nil {
 			out[k] = "[redacted]"
 			continue
 		}
-		out[k] = v
+		out[k] = redactValue(v)
 	}
 	return out
+}
+
+func redactValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return redactSecrets(t)
+	case []any:
+		cp := make([]any, len(t))
+		for i, e := range t {
+			cp[i] = redactValue(e)
+		}
+		return cp
+	default:
+		return v
+	}
 }
 
 func mustJSON(v any) string {

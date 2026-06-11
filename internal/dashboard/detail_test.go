@@ -101,8 +101,10 @@ const redacted = "[redacted]"
 
 func TestRedactSecrets(t *testing.T) {
 	in := map[string]any{
-		"sta":  map[string]any{"ssid": "net", "pass": "x", "password": "y"},
-		"safe": "value",
+		"sta":   map[string]any{"ssid": "net", "pass": "x", "password": "y"},
+		"safe":  "value",
+		"token": "tok123",
+		"list":  []any{map[string]any{"api_key": "k1", "name": "n"}},
 	}
 	out := redactSecrets(in)
 	sta := out["sta"].(map[string]any)
@@ -114,5 +116,12 @@ func TestRedactSecrets(t *testing.T) {
 	}
 	if in["sta"].(map[string]any)["pass"] != "x" {
 		t.Error("input must not be mutated")
+	}
+	if out["token"] != redacted {
+		t.Errorf("token must be redacted: %v", out["token"])
+	}
+	item := out["list"].([]any)[0].(map[string]any)
+	if item["api_key"] != redacted || item["name"] != "n" {
+		t.Errorf("array elements must be redacted recursively: %v", item)
 	}
 }

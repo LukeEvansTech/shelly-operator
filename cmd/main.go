@@ -207,9 +207,13 @@ func main() {
 	// +kubebuilder:scaffold:builder
 
 	if err := (&controller.ShellyDeviceReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("shellydevice-controller"),
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		// GetEventRecorderFor is deprecated in favor of GetEventRecorder
+		// (events.k8s.io API), but migrating changes the recorder interface
+		// (no Event method, requires an action field) across the controller
+		// and its test fakes. Deferred; see issue tracker.
+		Recorder:    mgr.GetEventRecorderFor("shellydevice-controller"), //nolint:staticcheck
 		Reader:      mgr.GetAPIReader(),
 		NameMapName: nameMapName,
 		Interval:    reconcileInterval,

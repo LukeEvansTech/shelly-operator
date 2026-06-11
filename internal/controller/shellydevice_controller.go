@@ -20,6 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlcontroller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -34,10 +35,12 @@ import (
 // +kubebuilder:rbac:groups=shelly.thirdimpact.io,resources=shellyprofiles,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 
-// ShellyDeviceReconciler matches each ShellyDevice to a ShellyProfile and
-// reports configuration drift on the InSync condition. Observe-only:
-// it never writes to devices (enforcement ships in a later release).
+// ShellyDeviceReconciler matches each ShellyDevice to a ShellyProfile,
+// reports drift on the InSync condition, and (for enforce-mode profiles)
+// corrects it by writing drifted sections to the device, safest-first
+// with auth last.
 type ShellyDeviceReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -92,6 +95,12 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, reason, msg, nil, "")
 	}
 
+	password, credErr := r.lookupPassword(ctx, dev.Namespace, profile.Spec.Config.Auth)
+	if credErr != nil {
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonCredentialsError,
+			credErr.Error(), nil, profile.Name)
+	}
+
 	desiredName := dev.Spec.DisplayName
 	if desiredName == "" {
 		var nameErr error
@@ -101,8 +110,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				nameErr.Error(), nil, profile.Name)
 		}
 	}
+	if n := profile.Spec.Config.Name; n != nil && n.Managed && desiredName == "" {
+		warns = append(warns, "name managed but unresolvable (no displayName or name-map entry)")
+	}
 
-	c := shelly.NewClient(dev.Status.Address, shelly.WithHTTPClient(r.HTTP))
+	c := r.deviceClient(dev.Status.Address, password)
 	actual, err := c.GetConfig(ctx)
 	if err != nil {
 		reason := shellyv1alpha1.ReasonConfigFetchFailed
@@ -122,24 +134,73 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			fmt.Sprintf("parsing device config: %v", err), nil, profile.Name)
 	}
 	if a := profile.Spec.Config.Auth; a != nil && a.Enable != nil && *a.Enable != dev.Status.AuthEnabled {
-		findings = append(findings, drift.Finding{Section: "auth", Path: "enable", Want: *a.Enable, Have: dev.Status.AuthEnabled})
+		findings = append(findings, drift.Finding{Section: sectionAuth, Path: "enable", Want: *a.Enable, Have: dev.Status.AuthEnabled})
 	}
 
-	if profile.Spec.Mode == shellyv1alpha1.ModeEnforce && len(findings) > 0 && r.Recorder != nil {
-		// Emit only on the transition into drift; steady-state drift would
-		// otherwise spam an event every reconcile.
-		if prev := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync); prev == nil || prev.Status != metav1.ConditionFalse {
-			r.Recorder.Event(&dev, corev1.EventTypeWarning, "EnforcementPending",
-				"profile mode is enforce, but enforcement is not implemented yet; observing only")
+	if profile.Spec.Mode == shellyv1alpha1.ModeEnforce && len(findings) > 0 && !dev.Spec.Paused {
+		var applyErr error
+		findings, _, applyErr = r.enforceAndRecheck(ctx, c, &dev, profile, desired, desiredName, password, findings, dev.Status.AuthEnabled)
+		if applyErr != nil {
+			return r.finish(ctx, &dev, metav1.ConditionFalse, shellyv1alpha1.ReasonApplyFailed,
+				withWarnings(fmt.Sprintf("enforcing drifted config: %v", applyErr), warns), findings, profile.Name)
 		}
 	}
 
 	if len(findings) == 0 {
 		return r.finish(ctx, &dev, metav1.ConditionTrue, shellyv1alpha1.ReasonInSync,
-			fmt.Sprintf("configuration matches profile %s", profile.Name), nil, profile.Name)
+			withWarnings(fmt.Sprintf("configuration matches profile %s", profile.Name), warns), nil, profile.Name)
 	}
 	return r.finish(ctx, &dev, metav1.ConditionFalse, shellyv1alpha1.ReasonDrifted,
-		drift.Summarize(findings), findings, profile.Name)
+		withWarnings(drift.Summarize(findings), warns), findings, profile.Name)
+}
+
+// enforceAndRecheck applies all drifted sections to the device and then
+// re-fetches config to verify the apply succeeded. It returns the updated
+// findings, the current auth state, and any apply/recheck error.
+func (r *ShellyDeviceReconciler) enforceAndRecheck(
+	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
+	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
+	desiredName, password string, findings []drift.Finding, authNow bool,
+) ([]drift.Finding, bool, error) {
+	appendAuthFinding := func(fs []drift.Finding, enabled bool) []drift.Finding {
+		if a := profile.Spec.Config.Auth; a != nil && a.Enable != nil && *a.Enable != enabled {
+			return append(fs, drift.Finding{Section: sectionAuth, Path: "enable", Want: *a.Enable, Have: enabled})
+		}
+		return fs
+	}
+
+	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), password)
+	if len(res.applied) > 0 && r.Recorder != nil {
+		r.Recorder.Event(dev, corev1.EventTypeNormal, "DriftCorrected",
+			fmt.Sprintf("applied sections: %s", strings.Join(res.applied, ", ")))
+	}
+	if res.restartRequired && r.Recorder != nil {
+		r.Recorder.Event(dev, corev1.EventTypeNormal, "RestartRequired",
+			"a configuration change requires a device restart to take effect")
+	}
+	if applyErr != nil {
+		return findings, authNow, applyErr
+	}
+	// Track auth state locally: status.authEnabled is stale until next sweep.
+	for _, s := range res.applied {
+		if s == sectionAuth {
+			if e := authEnableOf(profile); e != nil {
+				authNow = *e
+			}
+		}
+	}
+	c = r.deviceClient(dev.Status.Address, password)
+	actual, err := c.GetConfig(ctx)
+	if err != nil {
+		return nil, authNow, fmt.Errorf("re-checking after enforcement: %w", err)
+	}
+	desired = drift.Render(profile.Spec.Config, desiredName, actual)
+	findings, err = drift.Diff(desired, actual)
+	if err != nil {
+		return nil, authNow, fmt.Errorf("parsing device config after enforcement: %w", err)
+	}
+	findings = appendAuthFinding(findings, authNow)
+	return findings, authNow, nil
 }
 
 // finish records the reconcile outcome on status, emits an Event when the
@@ -189,6 +250,52 @@ func (r *ShellyDeviceReconciler) lookupName(ctx context.Context, namespace, devi
 	return cm.Data[deviceName], nil
 }
 
+// lookupPassword resolves the device admin password from the profile's
+// auth passwordSecretRef ("" when no ref configured). Read failures are
+// errors -- a configured ref that cannot be read must not silently
+// degrade to "no password".
+func (r *ShellyDeviceReconciler) lookupPassword(ctx context.Context, namespace string, auth *shellyv1alpha1.AuthSection) (string, error) {
+	if auth == nil || auth.PasswordSecretRef == nil || r.Reader == nil {
+		return "", nil
+	}
+	ref := auth.PasswordSecretRef
+	var secret corev1.Secret
+	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
+		return "", fmt.Errorf("reading password secret %s/%s: %w", namespace, ref.Name, err)
+	}
+	pw, ok := secret.Data[ref.Key]
+	if !ok {
+		return "", fmt.Errorf("password secret %s/%s has no key %q", namespace, ref.Name, ref.Key)
+	}
+	return string(pw), nil
+}
+
+// deviceClient builds an RPC client for the device, authenticated when a
+// password is available.
+func (r *ShellyDeviceReconciler) deviceClient(addr, password string) *shelly.Client {
+	opts := []shelly.Option{shelly.WithHTTPClient(r.HTTP)}
+	if password != "" {
+		opts = append(opts, shelly.WithPassword(password))
+	}
+	return shelly.NewClient(addr, opts...)
+}
+
+// withWarnings appends non-fatal warnings to a condition message.
+func withWarnings(msg string, warns []string) string {
+	if len(warns) == 0 {
+		return msg
+	}
+	return msg + " (warnings: " + strings.Join(warns, "; ") + ")"
+}
+
+// authEnableOf returns the profile's desired auth state (nil = unmanaged).
+func authEnableOf(p *shellyv1alpha1.ShellyProfile) *bool {
+	if p.Spec.Config.Auth == nil {
+		return nil
+	}
+	return p.Spec.Config.Auth.Enable
+}
+
 // jitter spreads requeues +/-10% so 46 devices don't thunder in lockstep.
 func (r *ShellyDeviceReconciler) jitter() time.Duration {
 	d := r.Interval
@@ -236,6 +343,7 @@ func (r *ShellyDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&shellyv1alpha1.ShellyDevice{}, builder.WithPredicates(devChanged)).
 		Watches(&shellyv1alpha1.ShellyProfile{}, handler.EnqueueRequestsFromMapFunc(mapAll)).
+		WithOptions(ctrlcontroller.Options{MaxConcurrentReconciles: 4}).
 		Named("shellydevice").
 		Complete(r)
 }

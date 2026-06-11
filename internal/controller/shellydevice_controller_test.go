@@ -380,3 +380,244 @@ func TestReconcileNameMapReadError(t *testing.T) {
 		t.Fatalf("name-map read failure must not masquerade as in-sync; condition = %+v", cond)
 	}
 }
+
+func createEnforceProfile(t *testing.T, ns string, cfg shellyv1alpha1.ProfileConfig) {
+	t.Helper()
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:     shellyv1alpha1.ModeEnforce,
+			Config:   cfg,
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createPasswordSecret(t *testing.T, ns, name, password string) {
+	t.Helper()
+	s := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		StringData: map[string]string{"password": password},
+	}
+	if err := k8sClient.Create(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnforceCorrectsDrift(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev20", MAC: "AABBCCDDEE30", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE30", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r, rec := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee30")
+
+	if got := fake.ConfigSnapshot()["sys"]["device"].(map[string]any)["eco_mode"]; got != true {
+		t.Errorf("device eco_mode = %v, want true (enforced)", got)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after enforce = %+v, want True", cond)
+	}
+	foundCorrected := false
+	for len(rec.Events) > 0 {
+		if e := <-rec.Events; strings.Contains(e, "DriftCorrected") {
+			foundCorrected = true
+		}
+	}
+	if !foundCorrected {
+		t.Error("expected a DriftCorrected event")
+	}
+}
+
+func TestEnforceObserveModeNeverWrites(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev21", MAC: "AABBCCDDEE31", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE31", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe mode
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee31")
+	for _, call := range fake.RecordedCalls() {
+		if strings.Contains(call.Method, "Set") {
+			t.Fatalf("observe mode must never write, saw %s", call.Method)
+		}
+	}
+}
+
+func TestEnforceAuthRolloutOrdersAuthLast(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev22", MAC: "AABBCCDDEE32", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE32", hostOf(srv.URL), true, false, "")
+	createPasswordSecret(t, ns, "device-admin", "hunter2")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(true),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee32")
+
+	if !fake.AuthEnabled() {
+		t.Fatal("device auth should be enabled")
+	}
+	calls := fake.RecordedCalls()
+	sysIdx, authIdx := -1, -1
+	for i, call := range calls {
+		if call.Method == "Sys.SetConfig" && sysIdx == -1 {
+			sysIdx = i
+		}
+		if call.Method == "Shelly.SetAuth" {
+			authIdx = i
+		}
+	}
+	if sysIdx == -1 || authIdx == -1 || sysIdx > authIdx {
+		t.Errorf("auth must apply last: sys@%d auth@%d calls=%v", sysIdx, authIdx, calls)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after auth rollout = %+v, want True", cond)
+	}
+}
+
+func TestEnforceMissingPasswordSecret(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev23", MAC: "AABBCCDDEE33", Gen: 2}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE33", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(true),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "nope", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee33")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Reason != shellyv1alpha1.ReasonCredentialsError {
+		t.Fatalf("condition = %+v, want CredentialsError", cond)
+	}
+	if fake.AuthEnabled() {
+		t.Error("auth must not be enabled without a readable secret")
+	}
+}
+
+func TestEnforceApplyFailureSurfaces(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev24", MAC: "AABBCCDDEE34", Gen: 2, SetConfigError: "rejected by device", InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE34", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee34")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != shellyv1alpha1.ReasonApplyFailed {
+		t.Fatalf("condition = %+v, want False/ApplyFailed", cond)
+	}
+	if !strings.Contains(cond.Message, "rejected by device") {
+		t.Errorf("message should carry the device error: %q", cond.Message)
+	}
+}
+
+func TestEnforceRestartRequiredEvent(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev25", MAC: "AABBCCDDEE35", Gen: 2, RestartOnSetConfig: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE35", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r, rec := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee35")
+	foundRestart := false
+	for len(rec.Events) > 0 {
+		if e := <-rec.Events; strings.Contains(e, "RestartRequired") {
+			foundRestart = true
+		}
+	}
+	if !foundRestart {
+		t.Error("expected a RestartRequired event")
+	}
+}
+
+func TestAuthEnabledDeviceUsesProfilePassword(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev26", MAC: "AABBCCDDEE36", Gen: 2, Password: "hunter2", InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	dev := createDevice(t, ns, "AABBCCDDEE36", hostOf(srv.URL), true, false, "")
+	dev.Status.AuthEnabled = true
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	createPasswordSecret(t, ns, "device-admin", "hunter2")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(true),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	got := reconcile(t, r, ns, "aabbccddee36")
+	cond := meta.FindStatusCondition(got.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("authed device should be readable and in sync, condition = %+v", cond)
+	}
+}
+
+func TestNameManagedButUnresolvableWarns(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev27", MAC: "AABBCCDDEE37", Gen: 2}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE37", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe; no name map CM, no displayName
+		Name: &shellyv1alpha1.NameSection{Managed: true},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee37")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || !strings.Contains(cond.Message, "unresolvable") {
+		t.Errorf("expected unresolvable-name warning in message, got %+v", cond)
+	}
+}

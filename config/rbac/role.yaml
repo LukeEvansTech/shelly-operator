@@ -20,6 +20,12 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
   - shelly.thirdimpact.io
   resources:
   - shellydevices

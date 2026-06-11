@@ -1,0 +1,30 @@
+package drift
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestApplyOrder(t *testing.T) {
+	in := []string{"auth", "cloud", "sys", "switch:1", "switch:0", "mqtt"}
+	want := []string{"sys", "switch:0", "switch:1", "mqtt", "cloud", "auth"}
+	if got := ApplyOrder(in); !reflect.DeepEqual(got, want) {
+		t.Errorf("ApplyOrder = %v, want %v", got, want)
+	}
+}
+
+func TestApplyOrderUnknownBeforeAuth(t *testing.T) {
+	in := []string{"auth", "ble"}
+	want := []string{"ble", "auth"}
+	if got := ApplyOrder(in); !reflect.DeepEqual(got, want) {
+		t.Errorf("ApplyOrder = %v, want %v", got, want)
+	}
+}
+
+func TestApplyOrderDoesNotMutateInput(t *testing.T) {
+	in := []string{"auth", "sys"}
+	_ = ApplyOrder(in)
+	if in[0] != "auth" {
+		t.Error("input slice must not be reordered in place")
+	}
+}

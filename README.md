@@ -15,10 +15,30 @@ and enforce-mode correction (safest-first apply, auth password rollout
 from Secrets, non-convergence damping); the shelly_exporter device-list
 ConfigMap feed (`--exporter-configmap`); and a read-only dashboard
 (`--dashboard-bind`, default :8090) showing fleet state, per-device drift
-diffs, and profile matching. Wifi management, MQTT credentials, and
+diffs, and profile matching; and wifi management (`spec.config.wifi` with
+sta/sta1 networks and passwords from Secrets). MQTT credentials and
 firmware updates are not implemented.
 
 ## Description
+
+### WiFi migration
+
+`spec.config.wifi` manages the device's client networks: `sta` (primary)
+and `sta1` (the device's fallback when sta is unreachable). Passwords are
+read from Secrets via `passSecretRef`, are never rendered, diffed, or
+displayed (devices treat them as write-only), and are injected only at
+apply time. Wifi is applied last of all sections -- after auth -- because
+it can move the device to another network.
+
+To migrate a fleet to a new network, point `sta` at the new network and
+keep `sta1` pointed at the old one: if the sta rollout is wrong, devices
+fall back to sta1 instead of being stranded (the controller warns when
+`sta` is managed without a `sta1` fallback). If a device becomes
+unreachable right after a wifi write, its InSync condition goes
+Unknown/`WifiApplied` until discovery re-finds it at its new address --
+so `--discovery-cidrs` must cover BOTH the old and new subnets for the
+duration of the migration. See
+`config/samples/shelly_v1alpha1_shellyprofile.yaml` for a worked example.
 
 ## Getting Started
 
@@ -37,7 +57,7 @@ make docker-build docker-push IMG=<some-registry>/shelly-operator:tag
 
 **NOTE:** This image ought to be published in the personal registry you specified.
 And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+Make sure you have the proper permission to the registry if the above commands don't work.
 
 **Install the CRDs into the cluster:**
 

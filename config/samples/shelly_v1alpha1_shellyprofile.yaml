@@ -20,6 +20,29 @@ spec:
       server: mqtt.svc.cluster.local:1883
     switch:
       initialState: restore_last
+    # WiFi migration example: sta is the NEW network, sta1 stays pointed at
+    # the OLD network as the device's fallback -- keep it there during a
+    # migration so a wrong sta rollout cannot strand devices; they fall
+    # back to sta1 and remain reachable. Passwords come from Secrets and
+    # are write-only on devices (never rendered, diffed, or displayed;
+    # injected only at apply time). Wifi is applied dead last, after auth,
+    # because it can move the device to another network: --discovery-cidrs
+    # must cover BOTH the old and new subnets during a migration so
+    # discovery can re-find devices at their new addresses.
+    wifi:
+      sta:
+        enable: true
+        ssid: iot-new
+        passSecretRef:
+          name: wifi-credentials
+          key: new
+      sta1:
+        # Old network kept as fallback until the migration settles.
+        enable: true
+        ssid: iot-old
+        passSecretRef:
+          name: wifi-credentials
+          key: old
     # Enforcement example: flip mode to "enforce" and declare auth to roll
     # out digest passwords fleet-wide (password read from a Secret).
     # auth:

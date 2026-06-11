@@ -221,6 +221,7 @@ func main() {
 	if exporterConfigMap != "" {
 		if err := (&exporterfeed.Reconciler{
 			Client:        mgr.GetClient(),
+			Reader:        mgr.GetAPIReader(),
 			Namespace:     deviceNamespace,
 			ConfigMapName: exporterConfigMap,
 			Options: exporterfeed.Options{

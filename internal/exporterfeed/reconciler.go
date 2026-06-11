@@ -27,9 +27,21 @@ const dataKey = "config.yaml"
 // re-renders; the write is skipped when nothing changed.
 type Reconciler struct {
 	client.Client
+	// Reader performs the ConfigMap read uncached so the manager's cache
+	// never starts a cluster-wide ConfigMap informer (writes stay on the
+	// cached client; the repo's name-map/secret reads follow the same
+	// convention).
+	Reader        client.Reader
 	Namespace     string // device namespace (the ConfigMap lives here too)
 	ConfigMapName string
 	Options       Options
+}
+
+func (r *Reconciler) reader() client.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
 }
 
 // Reconcile re-renders the ConfigMap. The request key is ignored: the
@@ -46,7 +58,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result
 
 	var cm corev1.ConfigMap
 	key := types.NamespacedName{Namespace: r.Namespace, Name: r.ConfigMapName}
-	err = r.Get(ctx, key, &cm)
+	err = r.reader().Get(ctx, key, &cm)
 	switch {
 	case apierrors.IsNotFound(err):
 		cm = corev1.ConfigMap{

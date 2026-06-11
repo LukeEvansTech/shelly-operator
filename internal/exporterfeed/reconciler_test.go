@@ -46,7 +46,7 @@ func TestFeedCreatesAndUpdatesConfigMap(t *testing.T) {
 	createFeedDevice(t, ns, "AABBCCDDEE50", "10.32.8.50", true)
 	createFeedDevice(t, ns, "AABBCCDDEE51", "10.32.8.51", false) // offline
 
-	r := &Reconciler{Client: k8sClient, Namespace: ns, ConfigMapName: "shelly-exporter-config",
+	r := &Reconciler{Client: k8sClient, Reader: k8sClient, Namespace: ns, ConfigMapName: "shelly-exporter-config",
 		Options: Options{ListenAddress: ":8080", DeviceUpdateInterval: 30}}
 	cm := feedReconcile(t, r, ns)
 	if !strings.Contains(cm.Data["config.yaml"], "10.32.8.50") || strings.Contains(cm.Data["config.yaml"], "10.32.8.51") {
@@ -82,7 +82,7 @@ func TestFeedCreatesAndUpdatesConfigMap(t *testing.T) {
 func TestFeedRestoresTamperedConfigMap(t *testing.T) {
 	ns := newNamespace(t)
 	createFeedDevice(t, ns, "AABBCCDDEE52", "10.32.8.52", true)
-	r := &Reconciler{Client: k8sClient, Namespace: ns, ConfigMapName: "shelly-exporter-config",
+	r := &Reconciler{Client: k8sClient, Reader: k8sClient, Namespace: ns, ConfigMapName: "shelly-exporter-config",
 		Options: Options{ListenAddress: ":8080", DeviceUpdateInterval: 30}}
 	cm := feedReconcile(t, r, ns)
 

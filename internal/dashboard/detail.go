@@ -61,14 +61,18 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	profile, _ := drift.MatchProfile(&dev, profiles.Items)
 
-	name, err := fleet.ResolveName(ctx, s.Reader, &dev, s.NameMapName)
-	if err == nil {
-		view.Name = name
+	name, nameErr := fleet.ResolveName(ctx, s.Reader, &dev, s.NameMapName)
+	if nameErr != nil {
+		view.Message = appendMsg(view.Message, fmt.Sprintf("name map unavailable: %v", nameErr))
 	}
+	view.Name = name
 
 	// Live diff only when reachable and governed by a profile.
 	if dev.Status.Online && dev.Status.Address != "" && profile != nil {
-		password, _ := fleet.ResolvePassword(ctx, s.Reader, dev.Namespace, profile.Spec.Config.Auth)
+		password, pwErr := fleet.ResolvePassword(ctx, s.Reader, dev.Namespace, profile.Spec.Config.Auth)
+		if pwErr != nil {
+			view.Message = appendMsg(view.Message, fmt.Sprintf("password secret unavailable: %v", pwErr))
+		}
 		opts := []shelly.Option{shelly.WithHTTPClient(s.HTTP)}
 		if password != "" {
 			opts = append(opts, shelly.WithPassword(password))
@@ -78,11 +82,15 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 			desired := drift.Render(profile.Spec.Config, name, actual)
 			findings, diffErr := drift.Diff(desired, actual)
 			if diffErr != nil {
-				view.Message = fmt.Sprintf("diff failed: %v", diffErr)
+				view.Message = appendMsg(view.Message, fmt.Sprintf("diff failed: %v", diffErr))
 			} else {
 				view.Findings = findings
 			}
-			view.Desired = mustJSON(desired)
+			redactedDesired := make(map[string]any, len(desired))
+			for k, v := range desired {
+				redactedDesired[k] = redactSecrets(v)
+			}
+			view.Desired = mustJSON(redactedDesired)
 			actualTree := map[string]any{}
 			for k, raw := range actual {
 				var v any
@@ -96,7 +104,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 			}
 			view.Actual = mustJSON(actualTree)
 		} else {
-			view.Message = fmt.Sprintf("live config fetch failed: %v", err)
+			view.Message = appendMsg(view.Message, fmt.Sprintf("live config fetch failed: %v", err))
 		}
 	}
 
@@ -169,6 +177,14 @@ func redactValue(v any) any {
 	default:
 		return v
 	}
+}
+
+// appendMsg joins display messages without clobbering earlier ones.
+func appendMsg(existing, add string) string {
+	if existing == "" {
+		return add
+	}
+	return existing + "; " + add
 }
 
 func mustJSON(v any) string {

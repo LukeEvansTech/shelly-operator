@@ -76,6 +76,8 @@ type ProfileConfig struct {
 	Auth *AuthSection `json:"auth,omitempty"`
 	// +optional
 	Switch *SwitchSection `json:"switch,omitempty"`
+	// +optional
+	Wifi *WifiSection `json:"wifi,omitempty"`
 }
 
 // SystemSection maps to the device's sys configuration.
@@ -160,6 +162,38 @@ type SwitchSection struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	PowerLimit *int32 `json:"powerLimit,omitempty"`
+}
+
+// WifiSection maps to the device's wifi configuration. Only the sta
+// (primary) and sta1 (fallback) client networks are managed; AP and
+// roaming settings are untouched. Devices never report stored WiFi
+// passwords, so password drift is undetectable -- passwords are injected
+// at apply time whenever a network's section is written for another
+// reason (ssid or enable drift).
+type WifiSection struct {
+	// Sta is the primary client network.
+	// +optional
+	Sta *WifiNetwork `json:"sta,omitempty"`
+	// Sta1 is the fallback client network, used by the device when sta is
+	// unreachable. During a migration, point sta1 at the old network so a
+	// bad sta rollout cannot strand devices.
+	// +optional
+	Sta1 *WifiNetwork `json:"sta1,omitempty"`
+}
+
+// WifiNetwork declares one WiFi client network (wifi.sta / wifi.sta1).
+// +kubebuilder:validation:XValidation:rule="!has(self.enable) || self.enable == false || (has(self.ssid) && size(self.ssid) > 0)",message="ssid is required when enable is true"
+type WifiNetwork struct {
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+	// SSID of the network. Required when enable is true.
+	// +optional
+	SSID string `json:"ssid,omitempty"`
+	// PassSecretRef names a Secret (same namespace) and key holding the
+	// network password. Omit for open networks or to keep whatever
+	// password is already stored on the device.
+	// +optional
+	PassSecretRef *SecretKeyRef `json:"passSecretRef,omitempty"`
 }
 
 // +kubebuilder:object:root=true

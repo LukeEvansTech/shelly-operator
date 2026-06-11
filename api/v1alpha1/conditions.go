@@ -30,4 +30,10 @@ const (
 	// sections until the diff changes (protects device flash from rewrite
 	// loops).
 	ReasonNotConverging = "NotConverging"
+	// ReasonWifiApplied: enforcement wrote wifi configuration and the
+	// device then became unreachable at its old address -- expected when
+	// it moved to a new network. Discovery updates status.address when
+	// the device reappears; ensure --discovery-cidrs covers the new
+	// subnet.
+	ReasonWifiApplied = "WifiApplied"
 )

@@ -160,6 +160,85 @@ spec:
                           (sys.device.eco_mode).
                         type: boolean
                     type: object
+                  wifi:
+                    description: |-
+                      WifiSection maps to the device's wifi configuration. Only the sta
+                      (primary) and sta1 (fallback) client networks are managed; AP and
+                      roaming settings are untouched. Devices never report stored WiFi
+                      passwords, so password drift is undetectable -- passwords are injected
+                      at apply time whenever a network's section is written for another
+                      reason (ssid or enable drift).
+                    properties:
+                      sta:
+                        description: Sta is the primary client network.
+                        properties:
+                          enable:
+                            type: boolean
+                          passSecretRef:
+                            description: |-
+                              PassSecretRef names a Secret (same namespace) and key holding the
+                              network password. Omit for open networks or to keep whatever
+                              password is already stored on the device.
+                            properties:
+                              key:
+                                description: Key within the Secret's data holding
+                                  the value.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name of the Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          ssid:
+                            description: SSID of the network. Required when enable
+                              is true.
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: ssid is required when enable is true
+                          rule: '!has(self.enable) || self.enable == false || (has(self.ssid)
+                            && size(self.ssid) > 0)'
+                      sta1:
+                        description: |-
+                          Sta1 is the fallback client network, used by the device when sta is
+                          unreachable. During a migration, point sta1 at the old network so a
+                          bad sta rollout cannot strand devices.
+                        properties:
+                          enable:
+                            type: boolean
+                          passSecretRef:
+                            description: |-
+                              PassSecretRef names a Secret (same namespace) and key holding the
+                              network password. Omit for open networks or to keep whatever
+                              password is already stored on the device.
+                            properties:
+                              key:
+                                description: Key within the Secret's data holding
+                                  the value.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name of the Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          ssid:
+                            description: SSID of the network. Required when enable
+                              is true.
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: ssid is required when enable is true
+                          rule: '!has(self.enable) || self.enable == false || (has(self.ssid)
+                            && size(self.ssid) > 0)'
+                    type: object
                 type: object
               mode:
                 default: observe

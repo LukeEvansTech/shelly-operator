@@ -24,7 +24,8 @@ const (
 	// ModeObserve reports drift without correcting it.
 	ModeObserve = "observe"
 	// ModeEnforce reports drift and corrects it by writing the drifted
-	// sections to the device, safest-first with auth last.
+	// sections to the device, safest-first with auth second-to-last and
+	// wifi dead last.
 	ModeEnforce = "enforce"
 )
 
@@ -47,8 +48,9 @@ type ShellyProfileSpec struct {
 
 	// Mode controls whether drift is only reported (observe) or also
 	// corrected by writing the drifted sections to the device (enforce).
-	// Enforcement applies safest-first and auth last; failures surface on
-	// the InSync condition with reason ApplyFailed.
+	// Enforcement applies safest-first with auth second-to-last and wifi
+	// dead last; failures surface on the InSync condition with reason
+	// ApplyFailed.
 	// +kubebuilder:validation:Enum=observe;enforce
 	// +kubebuilder:default=observe
 	// +optional

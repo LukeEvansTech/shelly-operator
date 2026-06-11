@@ -101,6 +101,12 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			credErr.Error(), nil, profile.Name)
 	}
 
+	wifiPw, wifiErr := fleet.ResolveWifiPasswords(ctx, r.Reader, dev.Namespace, profile.Spec.Config.Wifi)
+	if wifiErr != nil {
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonCredentialsError,
+			wifiErr.Error(), nil, profile.Name)
+	}
+
 	desiredName, nameErr := fleet.ResolveName(ctx, r.Reader, &dev, r.NameMapName)
 	if nameErr != nil {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
@@ -108,6 +114,9 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	if n := profile.Spec.Config.Name; n != nil && n.Managed && desiredName == "" {
 		warns = append(warns, "name managed but unresolvable (no displayName or name-map entry)")
+	}
+	if w := profile.Spec.Config.Wifi; w != nil && w.Sta != nil && w.Sta.SSID != "" && w.Sta1 == nil {
+		warns = append(warns, "wifi.sta is managed without a wifi.sta1 fallback; a wrong network can strand devices")
 	}
 
 	c := r.deviceClient(dev.Status.Address, password)
@@ -141,9 +150,7 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		var enforceResult ctrl.Result
 		var enforceErr error
 		var done bool
-		// Wifi passwords are not resolved yet; the zero value means no
-		// passwords are injected into wifi writes for now.
-		findings, enforceResult, enforceErr, done = r.runEnforce(ctx, c, &dev, profile, desired, desiredName, password, fleet.WifiPasswords{}, findings, warns)
+		findings, enforceResult, enforceErr, done = r.runEnforce(ctx, c, &dev, profile, desired, desiredName, password, wifiPw, findings, warns)
 		if done {
 			return enforceResult, enforceErr
 		}
@@ -208,6 +215,13 @@ func (r *ShellyDeviceReconciler) runEnforce(
 	if applyErr != nil {
 		var rerr *recheckError
 		if errors.As(applyErr, &rerr) {
+			// A recheck failure right after a wifi write is the expected
+			// migration outcome (the device moved networks), not an error.
+			if slices.Contains(applied, sectionWifi) {
+				res, err := r.finish(ctx, dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonWifiApplied,
+					withWarnings(fmt.Sprintf("wifi configuration applied; device no longer reachable at %s -- it may have moved networks; discovery will update the address when it reappears (ensure --discovery-cidrs covers the new subnet)", dev.Status.Address), warns), nil, profile.Name)
+				return findings, res, err, true
+			}
 			res, err := r.finish(ctx, dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
 				withWarnings(applyErr.Error(), warns), nil, profile.Name)
 			return findings, res, err, true

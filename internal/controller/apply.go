@@ -16,6 +16,11 @@ import (
 // sectionAuth is the pseudo-section name for Shelly.SetAuth.
 const sectionAuth = "auth"
 
+// sectionWifi is the wifi component section; special-cased because writes
+// inject resolved network passwords and a post-apply recheck failure means
+// the device may have moved networks (see runEnforce).
+const sectionWifi = "wifi"
+
 // applyResult reports what enforcement wrote to a device.
 type applyResult struct {
 	applied         []string // sections written, in apply order
@@ -51,7 +56,7 @@ func (r *ShellyDeviceReconciler) applyFindings(ctx context.Context, c *shelly.Cl
 			if err := c.SetAuth(ctx, info.ID, pw); err != nil {
 				return res, fmt.Errorf("auth: %w", err)
 			}
-		case section == "wifi":
+		case section == sectionWifi:
 			restart, err := c.SetConfig(ctx, section, wifiPayload(desired[section], wifiPw))
 			if err != nil {
 				return res, fmt.Errorf("%s: %w", section, err)

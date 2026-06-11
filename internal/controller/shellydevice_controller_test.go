@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -816,6 +817,201 @@ func TestEnforceSwitchConfig(t *testing.T) {
 	}
 	if !sawSwitchSet {
 		t.Error("expected Switch.SetConfig call")
+	}
+}
+
+func createWifiSecret(t *testing.T, ns string) {
+	t.Helper()
+	s := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "wifi-creds"},
+		StringData: map[string]string{"new": "hunter2"},
+	}
+	if err := k8sClient.Create(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnforceWifiAppliedLastWithPasswordInjected(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev40", MAC: "AABBCCDDEE40", Gen: 2, InitialConfig: map[string]map[string]any{
+		"wifi":  {"sta": map[string]any{"ssid": "iot-old", "enable": true}},
+		"cloud": {"enable": true},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE40", hostOf(srv.URL), true, false, "")
+	createWifiSecret(t, ns)
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Cloud: &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta: &shellyv1alpha1.WifiNetwork{
+				Enable:        boolPtr(true),
+				SSID:          "iot-new",
+				PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi-creds", Key: "new"},
+			},
+			Sta1: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-old"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee40")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after wifi enforce = %+v, want True", cond)
+	}
+
+	cloudIdx, wifiIdx := -1, -1
+	var wifiParams json.RawMessage
+	for i, call := range fake.RecordedCalls() {
+		if call.Method == "Cloud.SetConfig" && cloudIdx == -1 {
+			cloudIdx = i
+		}
+		if call.Method == "Wifi.SetConfig" {
+			wifiIdx = i
+			wifiParams = call.Params
+		}
+	}
+	if cloudIdx == -1 || wifiIdx == -1 || cloudIdx > wifiIdx {
+		t.Fatalf("wifi must apply dead last: cloud@%d wifi@%d", cloudIdx, wifiIdx)
+	}
+	var p struct {
+		Config map[string]map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(wifiParams, &p); err != nil {
+		t.Fatal(err)
+	}
+	sta := p.Config["sta"]
+	if sta["ssid"] != "iot-new" || sta["pass"] != "hunter2" {
+		t.Errorf("sta payload = %v, want ssid iot-new with pass hunter2", sta)
+	}
+	sta1, ok := p.Config["sta1"]
+	if !ok {
+		t.Fatal("sta1 must be present in the wifi payload")
+	}
+	if _, hasPass := sta1["pass"]; hasPass {
+		t.Errorf("sta1 has no passSecretRef, payload must not carry a pass key: %v", sta1)
+	}
+}
+
+func TestEnforceWifiDeviceVanishesAfterApply(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev41", MAC: "AABBCCDDEE41", Gen: 2, GetConfigErrorAfter: 1, InitialConfig: map[string]map[string]any{
+		"wifi": {"sta": map[string]any{"ssid": "iot-old", "enable": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE41", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta:  &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-new"},
+			Sta1: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-old"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee41")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != shellyv1alpha1.ReasonWifiApplied {
+		t.Fatalf("condition = %+v, want Unknown/WifiApplied", cond)
+	}
+	if !strings.Contains(cond.Message, "may have moved networks") {
+		t.Errorf("message should explain the migration outcome: %q", cond.Message)
+	}
+}
+
+func TestEnforceWifiMissingSecretIsCredentialsError(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev42", MAC: "AABBCCDDEE42", Gen: 2, InitialConfig: map[string]map[string]any{
+		"wifi": {"sta": map[string]any{"ssid": "iot-old", "enable": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE42", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta: &shellyv1alpha1.WifiNetwork{
+				Enable:        boolPtr(true),
+				SSID:          "iot-new",
+				PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "nope", Key: "new"},
+			},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee42")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionUnknown || cond.Reason != shellyv1alpha1.ReasonCredentialsError {
+		t.Fatalf("condition = %+v, want Unknown/CredentialsError", cond)
+	}
+	if !strings.Contains(cond.Message, "wifi sta password") {
+		t.Errorf("message should name the unreadable credential: %q", cond.Message)
+	}
+	for _, call := range fake.RecordedCalls() {
+		if strings.Contains(call.Method, "Set") {
+			t.Fatalf("unresolvable wifi secret must block all writes, saw %s", call.Method)
+		}
+	}
+}
+
+func TestWifiStaWithoutSta1Warns(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev43", MAC: "AABBCCDDEE43", Gen: 2, InitialConfig: map[string]map[string]any{
+		"wifi": {"sta": map[string]any{"ssid": "iot-old"}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE43", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe; matches the device -> no drift
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta: &shellyv1alpha1.WifiNetwork{SSID: "iot-old"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee43")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want True (no drift)", cond)
+	}
+	if !strings.Contains(cond.Message, "wifi.sta is managed without a wifi.sta1 fallback") {
+		t.Errorf("expected sta1 fallback warning in message: %q", cond.Message)
+	}
+}
+
+func TestObserveNeverWritesWifi(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev44", MAC: "AABBCCDDEE44", Gen: 2, InitialConfig: map[string]map[string]any{
+		"wifi": {"sta": map[string]any{"ssid": "iot-old", "enable": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE44", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe; wifi drifted
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta:  &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-new"},
+			Sta1: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-old"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee44")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != shellyv1alpha1.ReasonDrifted {
+		t.Fatalf("condition = %+v, want False/Drifted", cond)
+	}
+	found := false
+	for _, s := range dev.Status.DriftedSections {
+		if s == "wifi" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("driftedSections = %v, want wifi listed", dev.Status.DriftedSections)
+	}
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "Wifi.SetConfig" {
+			t.Fatal("observe mode must never write wifi")
+		}
 	}
 }
 

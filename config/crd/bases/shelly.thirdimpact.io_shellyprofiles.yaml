@@ -245,8 +245,9 @@ spec:
                 description: |-
                   Mode controls whether drift is only reported (observe) or also
                   corrected by writing the drifted sections to the device (enforce).
-                  Enforcement applies safest-first and auth last; failures surface on
-                  the InSync condition with reason ApplyFailed.
+                  Enforcement applies safest-first with auth second-to-last and wifi
+                  dead last; failures surface on the InSync condition with reason
+                  ApplyFailed.
                 enum:
                 - observe
                 - enforce

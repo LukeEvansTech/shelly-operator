@@ -1,8 +1,10 @@
 name: E2E Tests
 
+# Manual-only: the kind-based scaffold suite is unverified in CI and
+# installs cert-manager it does not need. Promote back to push/PR once
+# it has been run and trimmed.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 permissions: {}
 

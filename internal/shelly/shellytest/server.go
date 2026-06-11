@@ -47,6 +47,10 @@ type Device struct {
 	// SetConfigError, when non-empty, fails every *.SetConfig call with
 	// this message (simulates a device rejecting config).
 	SetConfigError string
+	// IgnoreSetConfig, when true, accepts *.SetConfig calls (success
+	// response) without changing config (simulates a device that clamps
+	// or reverts written values).
+	IgnoreSetConfig bool
 
 	// InitialConfig seeds the per-component config the device starts with.
 	// Keys are component names ("sys", "switch:0", ...); values are config maps.
@@ -194,6 +198,10 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(req.Method, ".SetConfig"):
 		if d.SetConfigError != "" {
 			writeJSON(w, rpcError(req.ID, -114, d.SetConfigError))
+			return
+		}
+		if d.IgnoreSetConfig {
+			writeJSON(w, rpcResult(req.ID, map[string]any{"restart_required": d.RestartOnSetConfig}))
 			return
 		}
 		comp := strings.ToLower(strings.TrimSuffix(req.Method, ".SetConfig"))

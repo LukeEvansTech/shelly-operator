@@ -396,10 +396,10 @@ func createEnforceProfile(t *testing.T, ns string, cfg shellyv1alpha1.ProfileCon
 	}
 }
 
-func createPasswordSecret(t *testing.T, ns, name, password string) {
+func createPasswordSecret(t *testing.T, ns, password string) {
 	t.Helper()
 	s := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "device-admin"},
 		StringData: map[string]string{"password": password},
 	}
 	if err := k8sClient.Create(context.Background(), s); err != nil {
@@ -469,7 +469,7 @@ func TestEnforceAuthRolloutOrdersAuthLast(t *testing.T) {
 	srv := shellytest.New(fake)
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE32", hostOf(srv.URL), true, false, "")
-	createPasswordSecret(t, ns, "device-admin", "hunter2")
+	createPasswordSecret(t, ns, "hunter2")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
 		Auth: &shellyv1alpha1.AuthSection{
@@ -587,7 +587,7 @@ func TestAuthEnabledDeviceUsesProfilePassword(t *testing.T) {
 	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
 		t.Fatal(err)
 	}
-	createPasswordSecret(t, ns, "device-admin", "hunter2")
+	createPasswordSecret(t, ns, "hunter2")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
 		Auth: &shellyv1alpha1.AuthSection{
@@ -636,6 +636,107 @@ func TestEnforceRecheckFailureIsNotApplyFailed(t *testing.T) {
 	}
 	if !foundCorrected {
 		t.Error("DriftCorrected event must still fire for the successful writes")
+	}
+}
+
+func TestEnforceAuthDisable(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev29", MAC: "AABBCCDDEE39", Gen: 2, Password: "hunter2"}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	dev := createDevice(t, ns, "AABBCCDDEE39", hostOf(srv.URL), true, false, "")
+	dev.Status.AuthEnabled = true
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	createPasswordSecret(t, ns, "hunter2")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(false),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	got := reconcile(t, r, ns, "aabbccddee39")
+	if fake.AuthEnabled() {
+		t.Fatal("device auth should be disabled")
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want True after auth disable", cond)
+	}
+}
+
+func TestWrongPasswordCannotSelfCorrect(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev30", MAC: "AABBCCDDEE3A", Gen: 2, Password: "right"}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	dev := createDevice(t, ns, "AABBCCDDEE3A", hostOf(srv.URL), true, false, "")
+	dev.Status.AuthEnabled = true
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	createPasswordSecret(t, ns, "wrong")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(true),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	got := reconcile(t, r, ns, "aabbccddee3a")
+	cond := meta.FindStatusCondition(got.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Reason != shellyv1alpha1.ReasonAuthRequired {
+		t.Fatalf("condition = %+v, want AuthRequired", cond)
+	}
+	if !strings.Contains(cond.Message, "rejected") {
+		t.Errorf("message should say the password was rejected: %q", cond.Message)
+	}
+	for _, call := range fake.RecordedCalls() {
+		if strings.Contains(call.Method, "Set") {
+			t.Fatalf("locked-out device must not be written, saw %s", call.Method)
+		}
+	}
+}
+
+func TestEnforceNonConvergenceDamping(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev31", MAC: "AABBCCDDEE3B", Gen: 2, IgnoreSetConfig: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE3B", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee3b")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Reason != shellyv1alpha1.ReasonNotConverging {
+		t.Fatalf("first cycle condition = %+v, want NotConverging", cond)
+	}
+	writesAfterFirst := 0
+	for _, call := range fake.RecordedCalls() {
+		if strings.Contains(call.Method, "SetConfig") {
+			writesAfterFirst++
+		}
+	}
+
+	// Second cycle: same stuck sections -> damped, no new writes.
+	_ = reconcile(t, r, ns, "aabbccddee3b")
+	writesAfterSecond := 0
+	for _, call := range fake.RecordedCalls() {
+		if strings.Contains(call.Method, "SetConfig") {
+			writesAfterSecond++
+		}
+	}
+	if writesAfterSecond != writesAfterFirst {
+		t.Errorf("damped cycle must not rewrite: writes %d -> %d", writesAfterFirst, writesAfterSecond)
 	}
 }
 

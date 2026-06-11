@@ -25,4 +25,9 @@ const (
 	// ReasonCredentialsError: the profile references a password Secret
 	// that cannot be read (missing Secret/key or API error).
 	ReasonCredentialsError = "CredentialsError"
+	// ReasonNotConverging: enforcement wrote the drifted sections but the
+	// device still reports the same drift; writes are paused for these
+	// sections until the diff changes (protects device flash from rewrite
+	// loops).
+	ReasonNotConverging = "NotConverging"
 )

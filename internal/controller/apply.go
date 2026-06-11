@@ -37,7 +37,7 @@ func (r *ShellyDeviceReconciler) applyFindings(ctx context.Context, c *shelly.Cl
 			if targetOn && password == "" {
 				return res, fmt.Errorf("auth: no password available (set spec.config.auth.passwordSecretRef)")
 			}
-			info, err := shelly.Probe(ctx, r.HTTP, dev.Status.Address)
+			info, err := shelly.Probe(ctx, r.rpcHTTPClient(), dev.Status.Address)
 			if err != nil {
 				return res, fmt.Errorf("auth: probing for device id: %w", err)
 			}

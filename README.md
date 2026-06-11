@@ -12,8 +12,10 @@ client (probe, JSON-RPC, SHA-256 digest auth, config get/set, SetAuth)
 with a fake-device test server; `ShellyDevice` CRD and subnet-sweep
 discovery (`--discovery-cidrs`); `ShellyProfile` CRD with drift detection
 and enforce-mode correction (safest-first apply, auth password rollout
-from Secrets, non-convergence damping, restart/failure reporting via
-Events and the InSync condition). Wifi management, MQTT credentials, and
+from Secrets, non-convergence damping); the shelly_exporter device-list
+ConfigMap feed (`--exporter-configmap`); and a read-only dashboard
+(`--dashboard-bind`, default :8090) showing fleet state, per-device drift
+diffs, and profile matching. Wifi management, MQTT credentials, and
 firmware updates are not implemented.
 
 ## Description

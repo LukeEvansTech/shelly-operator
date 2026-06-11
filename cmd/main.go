@@ -39,6 +39,7 @@ import (
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/controller"
+	"github.com/LukeEvansTech/shelly-operator/internal/dashboard"
 	"github.com/LukeEvansTech/shelly-operator/internal/discovery"
 	"github.com/LukeEvansTech/shelly-operator/internal/exporterfeed"
 	// +kubebuilder:scaffold:imports
@@ -101,6 +102,9 @@ func main() {
 	var exporterConfigMap string
 	flag.StringVar(&exporterConfigMap, "exporter-configmap", "",
 		"ConfigMap (in --device-namespace) to maintain with shelly_exporter's config.yaml. Empty disables the feed.")
+	var dashboardAddr string
+	flag.StringVar(&dashboardAddr, "dashboard-bind", ":8090",
+		"Listen address for the read-only dashboard. Empty disables it.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -229,6 +233,21 @@ func main() {
 		}
 	} else {
 		setupLog.Info("exporter feed disabled: no --exporter-configmap configured")
+	}
+
+	if dashboardAddr != "" {
+		if err := mgr.Add(&dashboard.Server{
+			Client:      mgr.GetClient(),
+			Reader:      mgr.GetAPIReader(),
+			Namespace:   deviceNamespace,
+			NameMapName: nameMapName,
+			Addr:        dashboardAddr,
+		}); err != nil {
+			setupLog.Error(err, "unable to add dashboard")
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("dashboard disabled: no --dashboard-bind configured")
 	}
 
 	if discoveryCIDRs != "" {

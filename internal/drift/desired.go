@@ -17,7 +17,8 @@ import (
 // Auth is deliberately not rendered: auth state is not part of
 // Shelly.GetConfig; the controller diffs it against status.authEnabled.
 // A nil pointer field within a section is likewise unmanaged and produces
-// no output.
+// no output. Wifi network passwords are never rendered; see
+// renderWifiNetwork.
 func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[string]json.RawMessage) map[string]map[string]any {
 	out := map[string]map[string]any{}
 
@@ -49,6 +50,19 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 
 	if cfg.Cloud != nil && cfg.Cloud.Enable != nil {
 		out["cloud"] = map[string]any{"enable": *cfg.Cloud.Enable}
+	}
+
+	if cfg.Wifi != nil {
+		w := map[string]any{}
+		if n := renderWifiNetwork(cfg.Wifi.Sta); n != nil {
+			w["sta"] = n
+		}
+		if n := renderWifiNetwork(cfg.Wifi.Sta1); n != nil {
+			w["sta1"] = n
+		}
+		if len(w) > 0 {
+			out["wifi"] = w
+		}
 	}
 
 	if cfg.Switch != nil {
@@ -83,4 +97,25 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 	}
 
 	return out
+}
+
+// renderWifiNetwork emits the diffable leaves of one WiFi network. The
+// password is deliberately absent: devices never report stored passwords,
+// so they cannot be diffed (and rendered output is shown on the
+// dashboard); enforcement injects them at apply time instead.
+func renderWifiNetwork(n *shellyv1alpha1.WifiNetwork) map[string]any {
+	if n == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if n.Enable != nil {
+		m["enable"] = *n.Enable
+	}
+	if n.SSID != "" {
+		m["ssid"] = n.SSID
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }

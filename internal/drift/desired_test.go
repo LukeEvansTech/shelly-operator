@@ -3,6 +3,7 @@ package drift
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
@@ -63,5 +64,40 @@ func TestRenderNameUnmanagedWithoutName(t *testing.T) {
 	got := Render(cfg, "", nil) // managed but no name resolvable -> nothing to declare
 	if len(got) != 0 {
 		t.Errorf("managed name with empty desired name must render nothing, got %v", got)
+	}
+}
+
+func TestRenderWifi(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{Wifi: &shellyv1alpha1.WifiSection{
+		Sta: &shellyv1alpha1.WifiNetwork{Enable: ptr(true), SSID: "iot-new",
+			PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi", Key: "new"}},
+		Sta1: &shellyv1alpha1.WifiNetwork{Enable: ptr(true), SSID: "iot-old"},
+	}}
+	got := Render(cfg, "", nil)
+	want := map[string]any{
+		"sta":  map[string]any{"enable": true, "ssid": "iot-new"},
+		"sta1": map[string]any{"enable": true, "ssid": "iot-old"},
+	}
+	if !reflect.DeepEqual(got["wifi"], want) {
+		t.Fatalf("wifi = %#v, want %#v", got["wifi"], want)
+	}
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "pass") {
+		t.Fatalf("rendered output leaks a password field: %s", b)
+	}
+}
+
+func TestRenderWifiEmptyAndNil(t *testing.T) {
+	if got := Render(shellyv1alpha1.ProfileConfig{Wifi: &shellyv1alpha1.WifiSection{}}, "", nil); got["wifi"] != nil {
+		t.Fatalf("empty wifi section must render nothing, got %#v", got["wifi"])
+	}
+	cfg := shellyv1alpha1.ProfileConfig{Wifi: &shellyv1alpha1.WifiSection{
+		Sta: &shellyv1alpha1.WifiNetwork{PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi", Key: "k"}},
+	}}
+	if got := Render(cfg, "", nil); got["wifi"] != nil {
+		t.Fatalf("pass-only network must render nothing, got %#v", got["wifi"])
 	}
 }

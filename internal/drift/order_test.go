@@ -21,6 +21,14 @@ func TestApplyOrderUnknownBeforeAuth(t *testing.T) {
 	}
 }
 
+func TestApplyOrderWifiLast(t *testing.T) {
+	got := ApplyOrder([]string{"wifi", "auth", "sys", "switch:0", "future"})
+	want := []string{"sys", "switch:0", "future", "auth", "wifi"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 func TestApplyOrderDoesNotMutateInput(t *testing.T) {
 	in := []string{"auth", "sys"}
 	_ = ApplyOrder(in)

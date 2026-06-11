@@ -1015,6 +1015,31 @@ func TestObserveNeverWritesWifi(t *testing.T) {
 	}
 }
 
+func TestWifiStaDeclaredDisabledWarns(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev45", MAC: "AABBCCDDEE45", Gen: 2, InitialConfig: map[string]map[string]any{
+		"wifi": {"sta": map[string]any{"ssid": "iot-old", "enable": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE45", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe; matches the device -> no drift
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(false), SSID: "iot-old"},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee45")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want True (no drift)", cond)
+	}
+	if !strings.Contains(cond.Message, "wifi.sta is declared disabled") {
+		t.Errorf("expected sta-disabled warning in message: %q", cond.Message)
+	}
+}
+
 func TestProfileRejectsSharedStaSta1SSID(t *testing.T) {
 	ns := newNamespace(t)
 	ctx := context.Background()

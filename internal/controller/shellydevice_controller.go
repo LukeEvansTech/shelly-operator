@@ -112,12 +112,7 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
 			nameErr.Error(), nil, profile.Name)
 	}
-	if n := profile.Spec.Config.Name; n != nil && n.Managed && desiredName == "" {
-		warns = append(warns, "name managed but unresolvable (no displayName or name-map entry)")
-	}
-	if w := profile.Spec.Config.Wifi; w != nil && w.Sta != nil && w.Sta.SSID != "" && w.Sta1 == nil {
-		warns = append(warns, "wifi.sta is managed without a wifi.sta1 fallback; a wrong network can strand devices")
-	}
+	warns = appendProfileWarnings(profile, desiredName, warns)
 
 	c := r.deviceClient(dev.Status.Address, password)
 	actual, err := c.GetConfig(ctx)
@@ -162,6 +157,22 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	return r.finish(ctx, &dev, metav1.ConditionFalse, shellyv1alpha1.ReasonDrifted,
 		withWarnings(drift.Summarize(findings), warns), findings, profile.Name)
+}
+
+// appendProfileWarnings adds operator-facing warnings about risky but
+// valid profile declarations. Warnings never block reconciliation; they
+// ride along in the InSync condition message.
+func appendProfileWarnings(profile *shellyv1alpha1.ShellyProfile, desiredName string, warns []string) []string {
+	if n := profile.Spec.Config.Name; n != nil && n.Managed && desiredName == "" {
+		warns = append(warns, "name managed but unresolvable (no displayName or name-map entry)")
+	}
+	if w := profile.Spec.Config.Wifi; w != nil && w.Sta != nil && w.Sta.SSID != "" && w.Sta1 == nil {
+		warns = append(warns, "wifi.sta is managed without a wifi.sta1 fallback; a wrong network can strand devices")
+	}
+	if w := profile.Spec.Config.Wifi; w != nil && w.Sta != nil && w.Sta.Enable != nil && !*w.Sta.Enable {
+		warns = append(warns, "wifi.sta is declared disabled; a device without another enabled network will be stranded")
+	}
+	return warns
 }
 
 // recheckError marks a failure that happened AFTER all device writes

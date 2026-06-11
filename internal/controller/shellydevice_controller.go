@@ -12,11 +12,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -28,6 +26,7 @@ import (
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/drift"
+	"github.com/LukeEvansTech/shelly-operator/internal/fleet"
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
 )
 
@@ -96,20 +95,16 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, reason, msg, nil, "")
 	}
 
-	password, credErr := r.lookupPassword(ctx, dev.Namespace, profile.Spec.Config.Auth)
+	password, credErr := fleet.ResolvePassword(ctx, r.Reader, dev.Namespace, profile.Spec.Config.Auth)
 	if credErr != nil {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonCredentialsError,
 			credErr.Error(), nil, profile.Name)
 	}
 
-	desiredName := dev.Spec.DisplayName
-	if desiredName == "" {
-		var nameErr error
-		desiredName, nameErr = r.lookupName(ctx, dev.Namespace, dev.Name)
-		if nameErr != nil {
-			return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
-				nameErr.Error(), nil, profile.Name)
-		}
+	desiredName, nameErr := fleet.ResolveName(ctx, r.Reader, &dev, r.NameMapName)
+	if nameErr != nil {
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+			nameErr.Error(), nil, profile.Name)
 	}
 	if n := profile.Spec.Config.Name; n != nil && n.Managed && desiredName == "" {
 		warns = append(warns, "name managed but unresolvable (no displayName or name-map entry)")
@@ -309,43 +304,6 @@ func (r *ShellyDeviceReconciler) finish(ctx context.Context, dev *shellyv1alpha1
 		r.Recorder.Event(dev, etype, reason, message)
 	}
 	return ctrl.Result{RequeueAfter: r.jitter()}, nil
-}
-
-// lookupName resolves a device's desired name from the name-map ConfigMap.
-// A missing ConfigMap means "no name managed" (""); any other read error
-// is returned so a transient API failure can't masquerade as in-sync.
-func (r *ShellyDeviceReconciler) lookupName(ctx context.Context, namespace, deviceName string) (string, error) {
-	if r.NameMapName == "" || r.Reader == nil {
-		return "", nil
-	}
-	var cm corev1.ConfigMap
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: r.NameMapName}, &cm); err != nil {
-		if apierrors.IsNotFound(err) {
-			return "", nil
-		}
-		return "", fmt.Errorf("reading name map %s/%s: %w", namespace, r.NameMapName, err)
-	}
-	return cm.Data[deviceName], nil
-}
-
-// lookupPassword resolves the device admin password from the profile's
-// auth passwordSecretRef ("" when no ref configured). Read failures are
-// errors -- a configured ref that cannot be read must not silently
-// degrade to "no password".
-func (r *ShellyDeviceReconciler) lookupPassword(ctx context.Context, namespace string, auth *shellyv1alpha1.AuthSection) (string, error) {
-	if auth == nil || auth.PasswordSecretRef == nil || r.Reader == nil {
-		return "", nil
-	}
-	ref := auth.PasswordSecretRef
-	var secret corev1.Secret
-	if err := r.Reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Name}, &secret); err != nil {
-		return "", fmt.Errorf("reading password secret %s/%s: %w", namespace, ref.Name, err)
-	}
-	pw, ok := secret.Data[ref.Key]
-	if !ok {
-		return "", fmt.Errorf("password secret %s/%s has no key %q", namespace, ref.Name, ref.Key)
-	}
-	return string(pw), nil
 }
 
 // rpcHTTPClient bounds all device HTTP, including probes. r.HTTP may be

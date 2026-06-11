@@ -68,9 +68,12 @@ spec:
                           used to authenticate to devices that already have auth enabled.
                         properties:
                           key:
+                            description: Key within the Secret's data holding the
+                              value.
                             minLength: 1
                             type: string
                           name:
+                            description: Name of the Secret.
                             minLength: 1
                             type: string
                         required:

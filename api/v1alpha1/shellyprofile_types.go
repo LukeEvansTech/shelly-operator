@@ -127,8 +127,10 @@ type AuthSection struct {
 
 // SecretKeyRef points at a key within a Secret in the same namespace.
 type SecretKeyRef struct {
+	// Name of the Secret.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
+	// Key within the Secret's data holding the value.
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
 }

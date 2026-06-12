@@ -304,7 +304,10 @@ func TestScheduleLifecycle(t *testing.T) {
 		t.Fatalf("created = %+v", created)
 	}
 
-	res, _ = postRPC(t, srv.URL, "Schedule.List", "")
+	res, rpcErr = postRPC(t, srv.URL, "Schedule.List", "")
+	if rpcErr != nil {
+		t.Fatalf("Schedule.List error: %s", *rpcErr)
+	}
 	if err := json.Unmarshal(res, &list); err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +322,10 @@ func TestScheduleLifecycle(t *testing.T) {
 	if _, rpcErr = postRPC(t, srv.URL, "Schedule.Delete", `{"id":1}`); rpcErr != nil {
 		t.Fatalf("Schedule.Delete error: %s", *rpcErr)
 	}
-	res, _ = postRPC(t, srv.URL, "Schedule.List", "")
+	res, rpcErr = postRPC(t, srv.URL, "Schedule.List", "")
+	if rpcErr != nil {
+		t.Fatalf("Schedule.List error: %s", *rpcErr)
+	}
 	if err := json.Unmarshal(res, &list); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +344,10 @@ func TestScheduleSeeding(t *testing.T) {
 	}}
 	srv := New(d)
 	defer srv.Close()
-	res, _ := postRPC(t, srv.URL, "Schedule.List", "")
+	res, rpcErr := postRPC(t, srv.URL, "Schedule.List", "")
+	if rpcErr != nil {
+		t.Fatalf("Schedule.List error: %s", *rpcErr)
+	}
 	var list struct {
 		Jobs []map[string]any `json:"jobs"`
 	}
@@ -348,7 +357,10 @@ func TestScheduleSeeding(t *testing.T) {
 	if len(list.Jobs) != 1 || list.Jobs[0]["id"].(float64) != 1 {
 		t.Fatalf("seeded list = %+v", list.Jobs)
 	}
-	res, _ = postRPC(t, srv.URL, "Schedule.Create", `{"enable":false,"timespec":"@daily","calls":[{"method":"Switch.Set"}]}`)
+	res, rpcErr = postRPC(t, srv.URL, "Schedule.Create", `{"enable":false,"timespec":"@daily","calls":[{"method":"Switch.Set"}]}`)
+	if rpcErr != nil {
+		t.Fatalf("Schedule.Create error: %s", *rpcErr)
+	}
 	var created struct {
 		ID int `json:"id"`
 	}

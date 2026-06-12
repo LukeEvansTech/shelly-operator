@@ -30,10 +30,11 @@ import (
 const testNonce = "testnonce1"
 
 // Device is the mutable state behind a fake Shelly device. Populate the
-// identity fields and InitialConfig, then pass it to New. Do not modify any
-// field after New returns. Inspect runtime state via RecordedCalls,
-// ConfigSnapshot, Challenges, and AuthEnabled. RestartOnSetConfig and
-// SetConfigError are optional knobs, set before New.
+// identity fields and InitialConfig, InitialSchedules, and AvailableUpdates,
+// then pass it to New. Do not modify any field after New returns. Inspect
+// runtime state via RecordedCalls, ConfigSnapshot, ScheduleSnapshot,
+// Challenges, and AuthEnabled. RestartOnSetConfig and SetConfigError are
+// optional knobs, set before New.
 type Device struct {
 	ID       string
 	MAC      string

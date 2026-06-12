@@ -1,6 +1,9 @@
 package shelly
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // ScheduleCall is one RPC invocation a schedule job performs. Origin
 // (present on app-created jobs) is deliberately not modeled: the
@@ -12,7 +15,9 @@ type ScheduleCall struct {
 
 // ScheduleJob is one entry in the device's schedule (Schedule.List).
 type ScheduleJob struct {
-	ID       int            `json:"id,omitempty"`
+	// ID is assigned by the device; it is read-only on the wire.
+	// CreateSchedule ignores this field; the device sets it in the response.
+	ID       int            `json:"id"`
 	Enable   bool           `json:"enable"`
 	Timespec string         `json:"timespec"`
 	Calls    []ScheduleCall `json:"calls"`
@@ -32,6 +37,9 @@ func (c *Client) ListSchedules(ctx context.Context) ([]ScheduleJob, error) {
 // CreateSchedule adds a job and returns its device-assigned id. job.ID
 // is ignored (the device assigns ids).
 func (c *Client) CreateSchedule(ctx context.Context, job ScheduleJob) (int, error) {
+	if len(job.Calls) == 0 {
+		return 0, errors.New("shelly: CreateSchedule requires at least one call")
+	}
 	var res struct {
 		ID int `json:"id"`
 	}

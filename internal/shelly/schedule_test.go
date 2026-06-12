@@ -8,6 +8,30 @@ import (
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly/shellytest"
 )
 
+func TestCreateScheduleRequiresCalls(t *testing.T) {
+	d := &shellytest.Device{ID: "dev1", MAC: "AABBCCDDEEFF", Gen: 2}
+	srv := shellytest.New(d)
+	defer srv.Close()
+	c := shelly.NewClient(hostOf(srv.URL))
+	ctx := context.Background()
+
+	_, err := c.CreateSchedule(ctx, shelly.ScheduleJob{
+		Enable:   true,
+		Timespec: "0 0 0 * * SUN",
+		Calls:    nil,
+	})
+	if err == nil {
+		t.Fatal("expected error when Calls is nil, got nil")
+	}
+
+	calls := d.RecordedCalls()
+	for _, call := range calls {
+		if call.Method == "Schedule.Create" {
+			t.Errorf("Schedule.Create was sent to the device despite empty Calls; recorded calls: %+v", calls)
+		}
+	}
+}
+
 func TestScheduleRoundTrip(t *testing.T) {
 	d := &shellytest.Device{ID: "dev1", MAC: "AABBCCDDEEFF", Gen: 2}
 	srv := shellytest.New(d)

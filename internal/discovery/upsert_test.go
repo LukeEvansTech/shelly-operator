@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
+	"github.com/LukeEvansTech/shelly-operator/internal/shelly/shellytest"
 )
 
 func TestApplyDeviceCreatesAndUpdates(t *testing.T) {
@@ -110,5 +112,66 @@ func TestApplyDeviceRefreshesLabelsPreservesUserLabels(t *testing.T) {
 	}
 	if dev.Labels["user/zone"] != "rack-1" {
 		t.Errorf("user label clobbered: %v", dev.Labels)
+	}
+}
+
+func TestApplyDeviceAvailableFirmware(t *testing.T) {
+	ns := newNamespace(t)
+	ctx := context.Background()
+	v175 := "1.7.5"
+	empty := ""
+
+	// First sweep: update pending.
+	f := Found{Host: "10.0.0.5", Info: &shelly.DeviceInfo{MAC: "AABBCCDDEF10", Model: "SNPL-00112UK", App: "PlusPlugUK", Gen: 2, Firmware: "1.4.4"},
+		AvailableFirmware: &v175}
+	if err := applyDevice(ctx, k8sClient, ns, time.Now(), f); err != nil {
+		t.Fatal(err)
+	}
+	var dev shellyv1alpha1.ShellyDevice
+	key := types.NamespacedName{Namespace: ns, Name: "aabbccddef10"}
+	if err := k8sClient.Get(ctx, key, &dev); err != nil {
+		t.Fatal(err)
+	}
+	if dev.Status.AvailableFirmware != "1.7.5" {
+		t.Fatalf("availableFirmware = %q", dev.Status.AvailableFirmware)
+	}
+
+	// Second sweep: Sys.GetStatus failed (nil) -> previous value kept.
+	f.AvailableFirmware = nil
+	if err := applyDevice(ctx, k8sClient, ns, time.Now(), f); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(ctx, key, &dev); err != nil {
+		t.Fatal(err)
+	}
+	if dev.Status.AvailableFirmware != "1.7.5" {
+		t.Fatalf("availableFirmware after unknown = %q", dev.Status.AvailableFirmware)
+	}
+
+	// Third sweep: device is current -> cleared.
+	f.AvailableFirmware = &empty
+	if err := applyDevice(ctx, k8sClient, ns, time.Now(), f); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Get(ctx, key, &dev); err != nil {
+		t.Fatal(err)
+	}
+	if dev.Status.AvailableFirmware != "" {
+		t.Fatalf("availableFirmware after current = %q", dev.Status.AvailableFirmware)
+	}
+}
+
+func TestProbeAllReadsAvailableFirmware(t *testing.T) {
+	d := &shellytest.Device{ID: "dev1", MAC: "AABBCCDDEF11", Model: "SNPL-00112UK", App: "PlusPlugUK", Gen: 2,
+		AvailableUpdates: map[string]any{"stable": map[string]any{"version": "1.7.5"}}}
+	srv := shellytest.New(d)
+	defer srv.Close()
+	hc := &http.Client{Timeout: 3 * time.Second}
+	found := probeAll(context.Background(), hc, []string{hostOf(srv.URL)}, 4)
+	if len(found) != 1 {
+		t.Fatalf("found = %+v", found)
+	}
+	if found[0].AvailableFirmware == nil || *found[0].AvailableFirmware != "1.7.5" {
+		t.Fatalf("availableFirmware = %v", found[0].AvailableFirmware)
 	}
 }

@@ -21,6 +21,7 @@ import (
 // conditions) are deliberately left alone, which is why fields are set
 // individually rather than replacing the whole struct.
 // f.Info must be non-nil with a non-empty MAC; the prober guarantees this.
+// availableFirmware is only written when the sweep's Sys.GetStatus read succeeded (nil keeps the previous value).
 func applyDevice(ctx context.Context, c client.Client, namespace string, now time.Time, f Found) error {
 	name := shellyv1alpha1.DeviceObjectName(f.Info.MAC)
 	labels := shellyv1alpha1.DeviceLabels(f.Info.Model, f.Info.App, int32(f.Info.Gen))
@@ -64,6 +65,9 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 	dev.Status.DeviceName = f.Info.Name
 	dev.Status.Online = true
 	dev.Status.LastSeen = &metav1.Time{Time: now}
+	if f.AvailableFirmware != nil {
+		dev.Status.AvailableFirmware = *f.AvailableFirmware
+	}
 	if err := c.Status().Update(ctx, &dev); err != nil {
 		if apierrors.IsConflict(err) {
 			// Stale resourceVersion: another writer (the device controller,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -240,5 +241,141 @@ func TestSetConfigRestartAndErrorKnobs(t *testing.T) {
 	}
 	if er.Error == nil || er.Error.Message != "boom" {
 		t.Errorf("SetConfigError knob must fail SetConfig, got %+v", er.Error)
+	}
+}
+
+// postRPC posts one JSON-RPC request to the fake and decodes the response
+// envelope. Local to these tests; auth-free devices only.
+func postRPC(t *testing.T, url, method, params string) (json.RawMessage, *json.RawMessage) {
+	t.Helper()
+	body := `{"id":1,"method":"` + method + `"`
+	if params != "" {
+		body += `,"params":` + params
+	}
+	body += `}`
+	resp, err := http.Post(url+"/rpc", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var env struct {
+		Result json.RawMessage  `json:"result"`
+		Error  *json.RawMessage `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	return env.Result, env.Error
+}
+
+func TestScheduleLifecycle(t *testing.T) {
+	d := &Device{ID: "dev1", MAC: "AABBCCDDEEFF", Gen: 2}
+	srv := New(d)
+	defer srv.Close()
+
+	res, rpcErr := postRPC(t, srv.URL, "Schedule.List", "")
+	if rpcErr != nil {
+		t.Fatalf("Schedule.List error: %s", *rpcErr)
+	}
+	var list struct {
+		Jobs []map[string]any `json:"jobs"`
+		Rev  int              `json:"rev"`
+	}
+	if err := json.Unmarshal(res, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Jobs) != 0 || list.Rev != 0 {
+		t.Fatalf("initial list = %+v", list)
+	}
+
+	res, rpcErr = postRPC(t, srv.URL, "Schedule.Create",
+		`{"enable":true,"timespec":"0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT","calls":[{"method":"Shelly.Update","params":{"stage":"stable"}}]}`)
+	if rpcErr != nil {
+		t.Fatalf("Schedule.Create error: %s", *rpcErr)
+	}
+	var created struct {
+		ID  int `json:"id"`
+		Rev int `json:"rev"`
+	}
+	if err := json.Unmarshal(res, &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID != 1 || created.Rev != 1 {
+		t.Fatalf("created = %+v", created)
+	}
+
+	res, _ = postRPC(t, srv.URL, "Schedule.List", "")
+	if err := json.Unmarshal(res, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Jobs) != 1 || list.Jobs[0]["id"].(float64) != 1 || list.Jobs[0]["timespec"] != "0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT" {
+		t.Fatalf("list after create = %+v", list.Jobs)
+	}
+
+	if jobs := d.ScheduleSnapshot(); len(jobs) != 1 {
+		t.Fatalf("snapshot = %+v", jobs)
+	}
+
+	if _, rpcErr = postRPC(t, srv.URL, "Schedule.Delete", `{"id":1}`); rpcErr != nil {
+		t.Fatalf("Schedule.Delete error: %s", *rpcErr)
+	}
+	res, _ = postRPC(t, srv.URL, "Schedule.List", "")
+	if err := json.Unmarshal(res, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Jobs) != 0 {
+		t.Fatalf("list after delete = %+v", list.Jobs)
+	}
+	if _, rpcErr = postRPC(t, srv.URL, "Schedule.Delete", `{"id":1}`); rpcErr == nil {
+		t.Fatal("expected error deleting missing job")
+	}
+}
+
+func TestScheduleSeeding(t *testing.T) {
+	d := &Device{ID: "dev1", MAC: "AABBCCDDEEFF", Gen: 2, InitialSchedules: []map[string]any{
+		{"enable": true, "timespec": "0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []any{map[string]any{"method": "Shelly.Update", "params": map[string]any{"stage": "stable"}, "origin": "shelly_service"}}},
+	}}
+	srv := New(d)
+	defer srv.Close()
+	res, _ := postRPC(t, srv.URL, "Schedule.List", "")
+	var list struct {
+		Jobs []map[string]any `json:"jobs"`
+	}
+	if err := json.Unmarshal(res, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Jobs) != 1 || list.Jobs[0]["id"].(float64) != 1 {
+		t.Fatalf("seeded list = %+v", list.Jobs)
+	}
+	res, _ = postRPC(t, srv.URL, "Schedule.Create", `{"enable":false,"timespec":"@daily","calls":[{"method":"Switch.Set"}]}`)
+	var created struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(res, &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID != 2 {
+		t.Fatalf("id after seed = %d", created.ID)
+	}
+}
+
+func TestSysGetStatusAvailableUpdates(t *testing.T) {
+	d := &Device{ID: "dev1", MAC: "AABBCCDDEEFF", Gen: 2,
+		AvailableUpdates: map[string]any{"stable": map[string]any{"version": "1.7.5"}}}
+	srv := New(d)
+	defer srv.Close()
+	res, rpcErr := postRPC(t, srv.URL, "Sys.GetStatus", "")
+	if rpcErr != nil {
+		t.Fatalf("Sys.GetStatus error: %s", *rpcErr)
+	}
+	var st struct {
+		AvailableUpdates map[string]map[string]string `json:"available_updates"`
+	}
+	if err := json.Unmarshal(res, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.AvailableUpdates["stable"]["version"] != "1.7.5" {
+		t.Fatalf("available_updates = %+v", st.AvailableUpdates)
 	}
 }

@@ -33,6 +33,14 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="InSync")].status
       name: In Sync
       type: string
+    - jsonPath: .status.firmware
+      name: Firmware
+      priority: 1
+      type: string
+    - jsonPath: .status.availableFirmware
+      name: Update
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -95,6 +103,13 @@ spec:
                 description: AuthEnabled reports whether the device requires digest
                   auth.
                 type: boolean
+              availableFirmware:
+                description: |-
+                  AvailableFirmware is the stable firmware version the device
+                  reports as available to install (from Sys.GetStatus
+                  available_updates), empty when the device is current. Beta
+                  releases are ignored. Refreshed by the discovery sweeper.
+                type: string
               conditions:
                 description: Conditions describe the device's reconciliation state.
                 items:

@@ -87,6 +87,23 @@ spec:
                       enable:
                         type: boolean
                     type: object
+                  firmware:
+                    description: |-
+                      FirmwareSection manages the device's firmware auto-update schedule
+                      job -- the Gen2 mechanism behind "automatic updates". It is a
+                      pseudo-section backed by Schedule RPCs (like auth, it is not part of
+                      Shelly.GetConfig). Only stable-channel updates are ever scheduled.
+                    properties:
+                      autoUpdate:
+                        description: |-
+                          AutoUpdate declares whether the device keeps itself on the latest
+                          stable firmware via a daily self-check (00:00 device-local time,
+                          matching the job the Shelly app creates). Any enabled schedule job
+                          calling Shelly.Update with stage "stable" satisfies it regardless
+                          of timespec; jobs targeting other stages are drift. nil leaves the
+                          device's setting unmanaged.
+                        type: boolean
+                    type: object
                   mqtt:
                     description: MQTTSection maps to the device's mqtt configuration.
                     properties:

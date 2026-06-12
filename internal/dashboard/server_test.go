@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -72,5 +73,33 @@ func TestFleetView(t *testing.T) {
 func TestServerIsNotLeaderElected(t *testing.T) {
 	if (&Server{}).NeedLeaderElection() {
 		t.Error("dashboard must run on every replica (read-only)")
+	}
+}
+
+func TestFleetShowsAvailableUpdate(t *testing.T) {
+	ns := newNamespace(t)
+	dev := &shellyv1alpha1.ShellyDevice{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "aabbccddef20"}}
+	if err := k8sClient.Create(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	dev.Status = shellyv1alpha1.ShellyDeviceStatus{
+		Address: "10.0.0.9", Model: "SNPL-00112UK", Online: true,
+		Firmware: "20241011-114446/1.4.4-g6d2a586", AvailableFirmware: "1.7.5",
+	}
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{Client: k8sClient, Reader: k8sClient, Namespace: ns}
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "1.7.5") {
+		t.Fatalf("fleet page missing available update:\n%s", body)
 	}
 }

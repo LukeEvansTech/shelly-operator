@@ -66,8 +66,8 @@ func (s *Server) handler() http.Handler {
 }
 
 type fleetRow struct {
-	Object, Name, Model, Address, Profile, Sync, SyncClass, Drift string
-	Online                                                        bool
+	Object, Name, Model, Address, Profile, Sync, SyncClass, Drift, Update string
+	Online                                                                bool
 }
 
 func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +88,7 @@ func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
 			Object: d.Name, Name: name, Model: d.Status.Model, Address: d.Status.Address,
 			Online: d.Status.Online, Profile: d.Status.MatchedProfile,
 			Sync: sync, SyncClass: class, Drift: strings.Join(d.Status.DriftedSections, ", "),
+			Update: d.Status.AvailableFirmware,
 		})
 	}
 	sort.Slice(rows, func(a, b int) bool { return rows[a].Object < rows[b].Object })

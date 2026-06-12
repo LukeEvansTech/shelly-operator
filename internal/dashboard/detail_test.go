@@ -81,6 +81,32 @@ func TestDeviceDetailNotFound(t *testing.T) {
 	}
 }
 
+func TestDeviceDetailShowsAvailableUpdate(t *testing.T) {
+	ns := newNamespace(t)
+	// Create device with AvailableFirmware set; offline so no live RPC is attempted.
+	dev := &shellyv1alpha1.ShellyDevice{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "aabbccddef30"},
+	}
+	if err := k8sClient.Create(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	dev.Status = shellyv1alpha1.ShellyDeviceStatus{
+		Address: "10.0.0.10", Model: "SNPL-00112UK", Online: false,
+		Firmware: "20241011-114446/1.4.4-g6d2a586", AvailableFirmware: "1.7.5",
+	}
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := get(t, newServer(ns), "/device/aabbccddef30")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", code, body)
+	}
+	if !strings.Contains(body, "update 1.7.5") {
+		t.Errorf("device detail page missing available update indicator:\n%s", body)
+	}
+}
+
 func TestProfilesView(t *testing.T) {
 	ns := newNamespace(t)
 	createDashProfile(t, ns, shellyv1alpha1.ProfileConfig{})

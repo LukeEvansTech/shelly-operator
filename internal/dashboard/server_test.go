@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -90,16 +89,8 @@ func TestFleetShowsAvailableUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &Server{Client: k8sClient, Reader: k8sClient, Namespace: ns}
-	srv := httptest.NewServer(s.handler())
-	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "1.7.5") {
-		t.Fatalf("fleet page missing available update:\n%s", body)
+	_, body := get(t, newServer(ns), "/")
+	if !strings.Contains(body, `pill warn">1.7.5`) {
+		t.Fatalf("fleet page missing available update pill:\n%s", body)
 	}
 }

@@ -13,6 +13,9 @@ import (
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly/shellytest"
 )
 
+// testFirmwareVersion is the pending firmware version used across update tests.
+const testFirmwareVersion = "1.7.5"
+
 func TestApplyDeviceCreatesAndUpdates(t *testing.T) {
 	ctx := context.Background()
 	ns := newNamespace(t)
@@ -118,7 +121,7 @@ func TestApplyDeviceRefreshesLabelsPreservesUserLabels(t *testing.T) {
 func TestApplyDeviceAvailableFirmware(t *testing.T) {
 	ns := newNamespace(t)
 	ctx := context.Background()
-	v175 := "1.7.5"
+	v175 := testFirmwareVersion
 	empty := ""
 
 	// First sweep: update pending.
@@ -132,7 +135,7 @@ func TestApplyDeviceAvailableFirmware(t *testing.T) {
 	if err := k8sClient.Get(ctx, key, &dev); err != nil {
 		t.Fatal(err)
 	}
-	if dev.Status.AvailableFirmware != "1.7.5" {
+	if dev.Status.AvailableFirmware != testFirmwareVersion {
 		t.Fatalf("availableFirmware = %q", dev.Status.AvailableFirmware)
 	}
 
@@ -144,7 +147,7 @@ func TestApplyDeviceAvailableFirmware(t *testing.T) {
 	if err := k8sClient.Get(ctx, key, &dev); err != nil {
 		t.Fatal(err)
 	}
-	if dev.Status.AvailableFirmware != "1.7.5" {
+	if dev.Status.AvailableFirmware != testFirmwareVersion {
 		t.Fatalf("availableFirmware after unknown = %q", dev.Status.AvailableFirmware)
 	}
 
@@ -163,7 +166,7 @@ func TestApplyDeviceAvailableFirmware(t *testing.T) {
 
 func TestProbeAllReadsAvailableFirmware(t *testing.T) {
 	d := &shellytest.Device{ID: "dev1", MAC: "AABBCCDDEF11", Model: "SNPL-00112UK", App: "PlusPlugUK", Gen: 2,
-		AvailableUpdates: map[string]any{"stable": map[string]any{"version": "1.7.5"}}}
+		AvailableUpdates: map[string]any{"stable": map[string]any{"version": testFirmwareVersion}}}
 	srv := shellytest.New(d)
 	defer srv.Close()
 	hc := &http.Client{Timeout: 3 * time.Second}
@@ -171,7 +174,7 @@ func TestProbeAllReadsAvailableFirmware(t *testing.T) {
 	if len(found) != 1 {
 		t.Fatalf("found = %+v", found)
 	}
-	if found[0].AvailableFirmware == nil || *found[0].AvailableFirmware != "1.7.5" {
+	if found[0].AvailableFirmware == nil || *found[0].AvailableFirmware != testFirmwareVersion {
 		t.Fatalf("availableFirmware = %v", found[0].AvailableFirmware)
 	}
 }

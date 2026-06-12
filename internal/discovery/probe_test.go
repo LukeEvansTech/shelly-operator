@@ -40,6 +40,13 @@ func TestProbeAll(t *testing.T) {
 	if macs["AABBCCDDEE01"] != hostOf(srv1.URL) || macs["AABBCCDDEE02"] != hostOf(srv2.URL) {
 		t.Errorf("unexpected hosts: %v", macs)
 	}
+	// Devices with no available updates must carry a pointer to empty string
+	// (Sys.GetStatus succeeded, stable update field absent => current firmware).
+	for _, f := range found {
+		if f.AvailableFirmware == nil || *f.AvailableFirmware != "" {
+			t.Errorf("device with no updates: AvailableFirmware = %v, want pointer to empty string", f.AvailableFirmware)
+		}
+	}
 }
 
 func TestProbeAllCancelled(t *testing.T) {

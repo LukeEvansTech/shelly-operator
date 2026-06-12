@@ -204,104 +204,132 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 	case req.Method == "Shelly.GetDeviceInfo":
 		writeJSON(w, rpcResult(req.ID, d.deviceInfo()))
 	case req.Method == "Shelly.GetConfig":
-		if d.GetConfigErrorAfter > 0 && d.getConfigCalls >= d.GetConfigErrorAfter {
-			writeJSON(w, rpcError(req.ID, -108, "config read failed"))
-			return
-		}
-		d.getConfigCalls++
-		writeJSON(w, rpcResult(req.ID, d.config))
+		d.handleGetConfig(w, req.ID)
 	case req.Method == "Shelly.SetAuth":
-		var p struct {
-			User  string  `json:"user"`
-			Realm string  `json:"realm"`
-			HA1   *string `json:"ha1"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.User != "admin" || p.Realm != d.ID {
-			writeJSON(w, rpcError(req.ID, -103, "invalid SetAuth params"))
-			return
-		}
-		if p.HA1 != nil && *p.HA1 == "" {
-			writeJSON(w, rpcError(req.ID, -103, "invalid SetAuth params"))
-			return
-		}
-		if p.HA1 == nil {
-			d.ha1 = ""
-		} else {
-			d.ha1 = *p.HA1
-		}
-		writeJSON(w, rpcResult(req.ID, nil))
+		d.handleSetAuth(w, req.ID, req.Params)
 	case req.Method == "Sys.GetStatus":
-		avail := d.AvailableUpdates
-		if avail == nil {
-			avail = map[string]any{}
-		}
-		writeJSON(w, rpcResult(req.ID, map[string]any{"available_updates": avail}))
+		d.handleSysGetStatus(w, req.ID)
 	case req.Method == "Schedule.List":
-		jobs := d.schedules
-		if jobs == nil {
-			jobs = []map[string]any{}
-		}
-		writeJSON(w, rpcResult(req.ID, map[string]any{"jobs": jobs, "rev": d.scheduleRev}))
+		d.handleScheduleList(w, req.ID)
 	case req.Method == "Schedule.Create":
-		var p map[string]any
-		if err := json.Unmarshal(req.Params, &p); err != nil || p["timespec"] == nil || p["calls"] == nil {
-			writeJSON(w, rpcError(req.ID, -103, "invalid Schedule.Create params"))
-			return
-		}
-		job := merge(nil, p)
-		job["id"] = d.nextSchedID
-		d.nextSchedID++
-		d.schedules = append(d.schedules, job)
-		d.scheduleRev++
-		writeJSON(w, rpcResult(req.ID, map[string]any{"id": job["id"], "rev": d.scheduleRev}))
+		d.handleScheduleCreate(w, req.ID, req.Params)
 	case req.Method == "Schedule.Delete":
-		var p struct {
-			ID *int `json:"id"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.ID == nil {
-			writeJSON(w, rpcError(req.ID, -103, "invalid Schedule.Delete params"))
-			return
-		}
-		idx := -1
-		for i, j := range d.schedules {
-			if idOf(j["id"]) == *p.ID {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			writeJSON(w, rpcError(req.ID, -103, fmt.Sprintf("schedule job %d not found", *p.ID)))
-			return
-		}
-		d.schedules = append(d.schedules[:idx], d.schedules[idx+1:]...)
-		d.scheduleRev++
-		writeJSON(w, rpcResult(req.ID, map[string]any{"rev": d.scheduleRev}))
+		d.handleScheduleDelete(w, req.ID, req.Params)
 	case strings.HasSuffix(req.Method, ".SetConfig"):
-		if d.SetConfigError != "" {
-			writeJSON(w, rpcError(req.ID, -114, d.SetConfigError))
-			return
-		}
-		if d.IgnoreSetConfig {
-			writeJSON(w, rpcResult(req.ID, map[string]any{"restart_required": d.RestartOnSetConfig}))
-			return
-		}
-		comp := strings.ToLower(strings.TrimSuffix(req.Method, ".SetConfig"))
-		var p struct {
-			ID     *int           `json:"id"`
-			Config map[string]any `json:"config"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil || p.Config == nil {
-			writeJSON(w, rpcError(req.ID, -103, "invalid params"))
-			return
-		}
-		if p.ID != nil { // keyed component, e.g. Switch.SetConfig {"id":0,...} -> "switch:0"
-			comp = fmt.Sprintf("%s:%d", comp, *p.ID)
-		}
-		d.config[comp] = merge(d.config[comp], p.Config)
-		writeJSON(w, rpcResult(req.ID, map[string]any{"restart_required": d.RestartOnSetConfig}))
+		d.handleSetConfig(w, req.ID, req.Method, req.Params)
 	default:
 		writeJSON(w, rpcError(req.ID, 404, "No handler for "+req.Method))
 	}
+}
+
+func (d *Device) handleGetConfig(w http.ResponseWriter, id int64) {
+	if d.GetConfigErrorAfter > 0 && d.getConfigCalls >= d.GetConfigErrorAfter {
+		writeJSON(w, rpcError(id, -108, "config read failed"))
+		return
+	}
+	d.getConfigCalls++
+	writeJSON(w, rpcResult(id, d.config))
+}
+
+func (d *Device) handleSetAuth(w http.ResponseWriter, id int64, params json.RawMessage) {
+	var p struct {
+		User  string  `json:"user"`
+		Realm string  `json:"realm"`
+		HA1   *string `json:"ha1"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.User != "admin" || p.Realm != d.ID {
+		writeJSON(w, rpcError(id, -103, "invalid SetAuth params"))
+		return
+	}
+	if p.HA1 != nil && *p.HA1 == "" {
+		writeJSON(w, rpcError(id, -103, "invalid SetAuth params"))
+		return
+	}
+	if p.HA1 == nil {
+		d.ha1 = ""
+	} else {
+		d.ha1 = *p.HA1
+	}
+	writeJSON(w, rpcResult(id, nil))
+}
+
+func (d *Device) handleSysGetStatus(w http.ResponseWriter, id int64) {
+	avail := d.AvailableUpdates
+	if avail == nil {
+		avail = map[string]any{}
+	}
+	writeJSON(w, rpcResult(id, map[string]any{"available_updates": avail}))
+}
+
+func (d *Device) handleScheduleList(w http.ResponseWriter, id int64) {
+	jobs := d.schedules
+	if jobs == nil {
+		jobs = []map[string]any{}
+	}
+	writeJSON(w, rpcResult(id, map[string]any{"jobs": jobs, "rev": d.scheduleRev}))
+}
+
+func (d *Device) handleScheduleCreate(w http.ResponseWriter, id int64, params json.RawMessage) {
+	var p map[string]any
+	if err := json.Unmarshal(params, &p); err != nil || p["timespec"] == nil || p["calls"] == nil {
+		writeJSON(w, rpcError(id, -103, "invalid Schedule.Create params"))
+		return
+	}
+	job := merge(nil, p)
+	job["id"] = d.nextSchedID
+	d.nextSchedID++
+	d.schedules = append(d.schedules, job)
+	d.scheduleRev++
+	writeJSON(w, rpcResult(id, map[string]any{"id": job["id"], "rev": d.scheduleRev}))
+}
+
+func (d *Device) handleScheduleDelete(w http.ResponseWriter, id int64, params json.RawMessage) {
+	var p struct {
+		ID *int `json:"id"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ID == nil {
+		writeJSON(w, rpcError(id, -103, "invalid Schedule.Delete params"))
+		return
+	}
+	idx := -1
+	for i, j := range d.schedules {
+		if idOf(j["id"]) == *p.ID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		writeJSON(w, rpcError(id, -103, fmt.Sprintf("schedule job %d not found", *p.ID)))
+		return
+	}
+	d.schedules = append(d.schedules[:idx], d.schedules[idx+1:]...)
+	d.scheduleRev++
+	writeJSON(w, rpcResult(id, map[string]any{"rev": d.scheduleRev}))
+}
+
+func (d *Device) handleSetConfig(w http.ResponseWriter, id int64, method string, params json.RawMessage) {
+	if d.SetConfigError != "" {
+		writeJSON(w, rpcError(id, -114, d.SetConfigError))
+		return
+	}
+	if d.IgnoreSetConfig {
+		writeJSON(w, rpcResult(id, map[string]any{"restart_required": d.RestartOnSetConfig}))
+		return
+	}
+	comp := strings.ToLower(strings.TrimSuffix(method, ".SetConfig"))
+	var p struct {
+		ID     *int           `json:"id"`
+		Config map[string]any `json:"config"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.Config == nil {
+		writeJSON(w, rpcError(id, -103, "invalid params"))
+		return
+	}
+	if p.ID != nil { // keyed component, e.g. Switch.SetConfig {"id":0,...} -> "switch:0"
+		comp = fmt.Sprintf("%s:%d", comp, *p.ID)
+	}
+	d.config[comp] = merge(d.config[comp], p.Config)
+	writeJSON(w, rpcResult(id, map[string]any{"restart_required": d.RestartOnSetConfig}))
 }
 
 // idOf normalises a job "id" value that may be int (set by the fake) or

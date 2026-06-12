@@ -40,6 +40,25 @@ so `--discovery-cidrs` must cover BOTH the old and new subnets for the
 duration of the migration. See
 `config/samples/shelly_v1alpha1_shellyprofile.yaml` for a worked example.
 
+### Firmware auto-update
+
+`spec.config.firmware.autoUpdate: true` keeps devices on the latest
+STABLE firmware using the device's own scheduler: the operator ensures
+an enabled schedule job calling `Shelly.Update {stage: stable}` exists
+(daily at 00:00 device-local time, identical to the job the Shelly app
+creates). Any enabled stable-update job satisfies the check regardless
+of its timespec, so devices configured via the app are compliant
+without rewrites; jobs targeting other stages (beta) are drift and are
+deleted under enforce. `autoUpdate: false` enforces the absence of
+update jobs; other schedule jobs are never touched.
+
+Pending updates are visible in `status.availableFirmware` (and
+`kubectl get shellydevices -o wide`), refreshed by the discovery sweep.
+Caution: a firmware update reboots the device, and after reboot a
+switch output follows its `initial_state` -- with `initial_state: off`
+the load stays off until something turns it back on. Consider managing
+`spec.config.switch.initialState: restore_last` alongside auto-update.
+
 ## Install (Helm)
 
 The chart and image are published to GHCR on each release:

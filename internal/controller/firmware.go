@@ -21,6 +21,9 @@ const sectionFirmware = "firmware"
 // timespec-agnostic; this is only what new jobs are created with.
 const autoUpdateTimespec = "0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT"
 
+// shellyUpdateMethod is the RPC method name for firmware updates.
+const shellyUpdateMethod = "Shelly.Update"
+
 // firmwareEnableOf returns the profile's desired auto-update state
 // (nil = section unmanaged).
 func firmwareEnableOf(p *shellyv1alpha1.ShellyProfile) *bool {
@@ -35,7 +38,7 @@ func firmwareEnableOf(p *shellyv1alpha1.ShellyProfile) *bool {
 // drift, never deleted.
 func isUpdateJob(j shelly.ScheduleJob) bool {
 	for _, c := range j.Calls {
-		if c.Method == "Shelly.Update" {
+		if c.Method == shellyUpdateMethod {
 			return true
 		}
 	}
@@ -47,7 +50,7 @@ func isUpdateJob(j shelly.ScheduleJob) bool {
 // stable on the device.
 func hasNonStableUpdateCall(j shelly.ScheduleJob) bool {
 	for _, c := range j.Calls {
-		if c.Method != "Shelly.Update" {
+		if c.Method != shellyUpdateMethod {
 			continue
 		}
 		if stage, ok := c.Params["stage"]; ok {
@@ -142,7 +145,7 @@ func applyFirmware(ctx context.Context, c *shelly.Client, want bool) error {
 		if _, err := c.CreateSchedule(ctx, shelly.ScheduleJob{
 			Enable:   true,
 			Timespec: autoUpdateTimespec,
-			Calls:    []shelly.ScheduleCall{{Method: "Shelly.Update", Params: map[string]any{"stage": "stable"}}},
+			Calls:    []shelly.ScheduleCall{{Method: shellyUpdateMethod, Params: map[string]any{"stage": "stable"}}},
 		}); err != nil {
 			return fmt.Errorf("creating auto-update job: %w", err)
 		}

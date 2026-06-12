@@ -1097,3 +1097,182 @@ func TestNameManagedButUnresolvableWarns(t *testing.T) {
 		t.Errorf("expected unresolvable-name warning in message, got %+v", cond)
 	}
 }
+
+func TestFirmwareCompliantAppJobNoWrites(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devfw1", MAC: "AABBCCDDEF01", Gen: 2,
+		InitialConfig: map[string]map[string]any{"sys": {"device": map[string]any{}}},
+		InitialSchedules: []map[string]any{
+			{"enable": true, "timespec": "0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
+				"calls": []any{map[string]any{"method": "Shelly.Update", "params": map[string]any{"stage": "stable"}, "origin": "shelly_service"}}},
+		}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEF01", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddef01")
+
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v", cond)
+	}
+	// The pre-existing app job must be untouched: no Create/Delete calls.
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "Schedule.Create" || call.Method == "Schedule.Delete" {
+			t.Fatalf("unexpected schedule write: %s", call.Method)
+		}
+	}
+	if jobs := fake.ScheduleSnapshot(); len(jobs) != 1 {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+}
+
+func TestFirmwareEnforceCreatesJob(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devfw2", MAC: "AABBCCDDEF02", Gen: 2,
+		InitialConfig: map[string]map[string]any{"sys": {"device": map[string]any{}}}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEF02", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddef02")
+
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != shellyv1alpha1.ReasonInSync {
+		t.Fatalf("condition = %+v", cond)
+	}
+	jobs := fake.ScheduleSnapshot()
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+	if jobs[0]["timespec"] != "0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT" || jobs[0]["enable"] != true {
+		t.Fatalf("created job = %+v", jobs[0])
+	}
+}
+
+func TestFirmwareEnforceDeletesBetaJob(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devfw3", MAC: "AABBCCDDEF03", Gen: 2,
+		InitialConfig: map[string]map[string]any{"sys": {"device": map[string]any{}}},
+		InitialSchedules: []map[string]any{
+			{"enable": true, "timespec": "@daily",
+				"calls": []any{map[string]any{"method": "Shelly.Update", "params": map[string]any{"stage": "beta"}}}},
+			{"enable": true, "timespec": "@sunset",
+				"calls": []any{map[string]any{"method": "Switch.Set", "params": map[string]any{"id": 0, "on": true}}}},
+		}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEF03", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddef03")
+
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v", cond)
+	}
+	// Beta job deleted, unrelated Switch.Set job untouched, stable job created.
+	jobs := fake.ScheduleSnapshot()
+	if len(jobs) != 2 {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+	methods := map[string]bool{}
+	for _, j := range jobs {
+		calls := j["calls"].([]any)
+		m := calls[0].(map[string]any)["method"].(string)
+		methods[m] = true
+		if m == "Shelly.Update" {
+			if calls[0].(map[string]any)["params"].(map[string]any)["stage"] != "stable" {
+				t.Fatalf("surviving update job = %+v", j)
+			}
+		}
+	}
+	if !methods["Switch.Set"] || !methods["Shelly.Update"] {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+}
+
+func TestFirmwareEnforceDisableDeletesJobs(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devfw4", MAC: "AABBCCDDEF04", Gen: 2,
+		InitialConfig: map[string]map[string]any{"sys": {"device": map[string]any{}}},
+		InitialSchedules: []map[string]any{
+			{"enable": true, "timespec": "0 0 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
+				"calls": []any{map[string]any{"method": "Shelly.Update", "params": map[string]any{"stage": "stable"}}}},
+		}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEF04", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(false)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddef04")
+
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v", cond)
+	}
+	if jobs := fake.ScheduleSnapshot(); len(jobs) != 0 {
+		t.Fatalf("jobs = %+v", jobs)
+	}
+}
+
+func TestFirmwareObserveModeReportsDriftWithoutWrites(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devfw5", MAC: "AABBCCDDEF05", Gen: 2,
+		InitialConfig: map[string]map[string]any{"sys": {"device": map[string]any{}}}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEF05", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe mode
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddef05")
+
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != shellyv1alpha1.ReasonDrifted {
+		t.Fatalf("condition = %+v", cond)
+	}
+	if len(dev.Status.DriftedSections) != 1 || dev.Status.DriftedSections[0] != "firmware" {
+		t.Fatalf("driftedSections = %v", dev.Status.DriftedSections)
+	}
+	if jobs := fake.ScheduleSnapshot(); len(jobs) != 0 {
+		t.Fatalf("observe mode must not write; jobs = %+v", jobs)
+	}
+}
+
+func TestFirmwareUnmanagedSkipsScheduleRPC(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devfw6", MAC: "AABBCCDDEF06", Gen: 2,
+		InitialConfig: map[string]map[string]any{"cloud": {"enable": false}}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEF06", hostOf(srv.URL), true, false, "")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Cloud: &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},
+	})
+
+	r, _ := newReconciler()
+	reconcile(t, r, ns, "aabbccddef06")
+
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "Schedule.List" {
+			t.Fatal("Schedule.List called for a profile that does not manage firmware")
+		}
+	}
+}

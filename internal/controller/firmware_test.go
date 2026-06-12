@@ -56,6 +56,17 @@ func TestFirmwareFindings(t *testing.T) {
 					t.Errorf("finding section = %q", f.Section)
 				}
 			}
+			if tc.name == "want off, stable job is drift" && fs[0].Path != "job:1" {
+				t.Errorf("path = %q, want job:1", fs[0].Path)
+			}
+			if tc.name == "want on, beta job is drift plus missing stable" {
+				if fs[0].Have != "non-stable stage" {
+					t.Errorf("first finding = %+v, want non-stable stage", fs[0])
+				}
+				if fs[1].Path != "autoUpdate" {
+					t.Errorf("second finding = %+v, want autoUpdate path", fs[1])
+				}
+			}
 		})
 	}
 }

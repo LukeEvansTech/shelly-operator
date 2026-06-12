@@ -68,6 +68,13 @@ type ShellyDeviceStatus struct {
 	// +optional
 	Firmware string `json:"firmware,omitempty"`
 
+	// AvailableFirmware is the stable firmware version the device
+	// reports as available to install (from Sys.GetStatus
+	// available_updates), empty when the device is current. Beta
+	// releases are ignored. Refreshed by the discovery sweeper.
+	// +optional
+	AvailableFirmware string `json:"availableFirmware,omitempty"`
+
 	// AuthEnabled reports whether the device requires digest auth.
 	// +optional
 	AuthEnabled bool `json:"authEnabled,omitempty"`
@@ -108,6 +115,8 @@ type ShellyDeviceStatus struct {
 // +kubebuilder:printcolumn:name="Online",type=boolean,JSONPath=`.status.online`
 // +kubebuilder:printcolumn:name="Last Seen",type=date,JSONPath=`.status.lastSeen`
 // +kubebuilder:printcolumn:name="In Sync",type=string,JSONPath=`.status.conditions[?(@.type=="InSync")].status`
+// +kubebuilder:printcolumn:name="Firmware",type=string,JSONPath=`.status.firmware`,priority=1
+// +kubebuilder:printcolumn:name="Update",type=string,JSONPath=`.status.availableFirmware`,priority=1
 
 // ShellyDevice represents one discovered Shelly Gen2+ device. Objects are
 // created and maintained by the discovery sweeper (named by lowercased

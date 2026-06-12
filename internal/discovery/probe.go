@@ -16,6 +16,12 @@ const defaultProbeConcurrency = 32
 type Found struct {
 	Host string // host[:port] the device answered at
 	Info *shelly.DeviceInfo
+
+	// AvailableFirmware is the pending stable firmware version from
+	// Sys.GetStatus ("" = device is current). nil when the status read
+	// failed (e.g. auth-enabled device; the sweeper has no credentials)
+	// -- the upsert then keeps the previously recorded value.
+	AvailableFirmware *string
 }
 
 // probeAll probes every target with bounded concurrency and returns the
@@ -47,8 +53,19 @@ func probeAll(ctx context.Context, hc *http.Client, targets []string, concurrenc
 			if err != nil || info.MAC == "" || info.Gen < 2 {
 				return // unreachable, not a Shelly, or unsupported Gen1; skip
 			}
+			f := Found{Host: target, Info: info}
+			// Best-effort second read: pending-update visibility. Failure
+			// (auth-enabled device, flaky link) leaves the field nil so the
+			// upsert keeps the previous value. Beta releases are ignored.
+			if st, serr := shelly.NewClient(target, shelly.WithHTTPClient(hc)).GetSysStatus(ctx); serr == nil {
+				v := ""
+				if st.AvailableUpdates.Stable != nil {
+					v = st.AvailableUpdates.Stable.Version
+				}
+				f.AvailableFirmware = &v
+			}
 			mu.Lock()
-			found = append(found, Found{Host: target, Info: info})
+			found = append(found, f)
 			mu.Unlock()
 		}(target)
 	}

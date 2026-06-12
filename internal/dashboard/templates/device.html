@@ -5,7 +5,7 @@
 <span class="pill {{.SyncClass}}">{{.Sync}}</span>
 {{if .Profile}}profile: <a href="/profiles">{{.Profile}}</a>{{else}}<span class="muted">no profile</span>{{end}}
 </p>
-<p class="muted">{{.Model}} | gen {{.Gen}} | {{.Address}} | fw {{.Firmware}}</p>
+<p class="muted">{{.Model}} | gen {{.Gen}} | {{.Address}} | fw {{.Firmware}}{{if .AvailableFirmware}} <span class="pill warn">update {{.AvailableFirmware}}</span>{{end}}</p>
 {{if .Message}}<p>{{.Message}}</p>{{end}}
 {{if .Findings}}
 <h2>Drift</h2>

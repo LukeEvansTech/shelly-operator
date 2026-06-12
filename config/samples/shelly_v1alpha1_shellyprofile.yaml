@@ -20,6 +20,8 @@ spec:
       server: mqtt.svc.cluster.local:1883
     switch:
       initialState: restore_last
+    firmware:
+      autoUpdate: true
     # WiFi migration example: sta is the NEW network, sta1 stays pointed at
     # the OLD network as the device's fallback -- keep it there during a
     # migration so a wrong sta rollout cannot strand devices; they fall

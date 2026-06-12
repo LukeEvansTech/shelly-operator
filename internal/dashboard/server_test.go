@@ -74,3 +74,23 @@ func TestServerIsNotLeaderElected(t *testing.T) {
 		t.Error("dashboard must run on every replica (read-only)")
 	}
 }
+
+func TestFleetShowsAvailableUpdate(t *testing.T) {
+	ns := newNamespace(t)
+	dev := &shellyv1alpha1.ShellyDevice{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "aabbccddef20"}}
+	if err := k8sClient.Create(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	dev.Status = shellyv1alpha1.ShellyDeviceStatus{
+		Address: "10.0.0.9", Model: "SNPL-00112UK", Online: true,
+		Firmware: "20241011-114446/1.4.4-g6d2a586", AvailableFirmware: "1.7.5",
+	}
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+
+	_, body := get(t, newServer(ns), "/")
+	if !strings.Contains(body, `pill warn">1.7.5`) {
+		t.Fatalf("fleet page missing available update pill:\n%s", body)
+	}
+}

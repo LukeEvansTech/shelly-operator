@@ -25,11 +25,11 @@ var (
 )
 
 type deviceView struct {
-	Object, Name, Model, Address, Firmware, Profile, Sync, SyncClass, Message string
-	Gen                                                                       int32
-	Online                                                                    bool
-	Findings                                                                  []drift.Finding
-	Desired, Actual                                                           string
+	Object, Name, Model, Address, Firmware, AvailableFirmware, Profile, Sync, SyncClass, Message string
+	Gen                                                                                          int32
+	Online                                                                                       bool
+	Findings                                                                                     []drift.Finding
+	Desired, Actual                                                                              string
 }
 
 func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
@@ -47,8 +47,9 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 	sync, class := syncState(&dev)
 	view := deviceView{
 		Object: dev.Name, Model: dev.Status.Model, Address: dev.Status.Address,
-		Firmware: dev.Status.Firmware, Profile: dev.Status.MatchedProfile,
-		Gen: dev.Status.Gen, Online: dev.Status.Online, Sync: sync, SyncClass: class,
+		Firmware: dev.Status.Firmware, AvailableFirmware: dev.Status.AvailableFirmware,
+		Profile: dev.Status.MatchedProfile,
+		Gen:     dev.Status.Gen, Online: dev.Status.Online, Sync: sync, SyncClass: class,
 	}
 	if c := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync); c != nil {
 		view.Message = c.Message

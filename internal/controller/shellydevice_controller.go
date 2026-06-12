@@ -140,6 +140,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			fmt.Sprintf("parsing device config: %v", err), nil, profile.Name)
 	}
 	findings = appendAuthFinding(profile, findings, dev.Status.AuthEnabled)
+	findings, err = appendFirmwareFindings(ctx, c, profile, findings)
+	if err != nil {
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+			fmt.Sprintf("fetching schedule jobs: %v", err), nil, profile.Name)
+	}
 
 	if profile.Spec.Mode == shellyv1alpha1.ModeEnforce && len(findings) > 0 && !dev.Spec.Paused { // defense-in-depth; paused returns earlier
 		var enforceResult ctrl.Result
@@ -269,7 +274,7 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
 	desiredName, password string, wifiPw fleet.WifiPasswords, findings []drift.Finding, authNow bool,
 ) ([]drift.Finding, []string, bool, error) {
-	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), password, wifiPw)
+	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), firmwareEnableOf(profile), password, wifiPw)
 	if len(res.applied) > 0 && r.Recorder != nil {
 		r.Recorder.Event(dev, corev1.EventTypeNormal, "DriftCorrected",
 			fmt.Sprintf("applied sections: %s", strings.Join(res.applied, ", ")))
@@ -300,6 +305,10 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 		return nil, res.applied, authNow, &recheckError{err: fmt.Errorf("parsing device config after enforcement: %w", err)}
 	}
 	findings = appendAuthFinding(profile, findings, authNow)
+	findings, err = appendFirmwareFindings(ctx, c, profile, findings)
+	if err != nil {
+		return nil, res.applied, authNow, &recheckError{err: fmt.Errorf("re-checking schedule jobs after enforcement: %w", err)}
+	}
 	return findings, res.applied, authNow, nil
 }
 

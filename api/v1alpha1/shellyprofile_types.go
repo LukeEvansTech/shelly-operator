@@ -80,6 +80,8 @@ type ProfileConfig struct {
 	Switch *SwitchSection `json:"switch,omitempty"`
 	// +optional
 	Wifi *WifiSection `json:"wifi,omitempty"`
+	// +optional
+	Firmware *FirmwareSection `json:"firmware,omitempty"`
 }
 
 // SystemSection maps to the device's sys configuration.
@@ -197,6 +199,21 @@ type WifiNetwork struct {
 	// password is already stored on the device.
 	// +optional
 	PassSecretRef *SecretKeyRef `json:"passSecretRef,omitempty"`
+}
+
+// FirmwareSection manages the device's firmware auto-update schedule
+// job -- the Gen2 mechanism behind "automatic updates". It is a
+// pseudo-section backed by Schedule RPCs (like auth, it is not part of
+// Shelly.GetConfig). Only stable-channel updates are ever scheduled.
+type FirmwareSection struct {
+	// AutoUpdate declares whether the device keeps itself on the latest
+	// stable firmware via a daily self-check (00:00 device-local time,
+	// matching the job the Shelly app creates). Any enabled schedule job
+	// calling Shelly.Update with stage "stable" satisfies it regardless
+	// of timespec; jobs targeting other stages are drift. nil leaves the
+	// device's setting unmanaged.
+	// +optional
+	AutoUpdate *bool `json:"autoUpdate,omitempty"`
 }
 
 // +kubebuilder:object:root=true

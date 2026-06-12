@@ -2,6 +2,7 @@ package drift
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -34,5 +35,13 @@ func TestApplyOrderDoesNotMutateInput(t *testing.T) {
 	_ = ApplyOrder(in)
 	if in[0] != "auth" {
 		t.Error("input slice must not be reordered in place")
+	}
+}
+
+func TestApplyOrderFirmwareBeforeAuthAndWifi(t *testing.T) {
+	got := ApplyOrder([]string{"wifi", "auth", "firmware", "cloud", "sys"})
+	want := []string{"sys", "cloud", "firmware", "auth", "wifi"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("ApplyOrder = %v, want %v", got, want)
 	}
 }

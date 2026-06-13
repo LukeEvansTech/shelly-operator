@@ -13,9 +13,10 @@ func TestApplyOrder(t *testing.T) {
 	}
 }
 
-func TestApplyOrderUnknownBeforeAuth(t *testing.T) {
-	in := []string{"auth", "ble"}
-	want := []string{"ble", "auth"}
+func TestApplyOrderBLEBeforeAuth(t *testing.T) {
+	// ble is an explicitly-ranked section (3, alongside cloud), well before auth.
+	in := []string{"auth", "ble", "cloud"}
+	want := []string{"ble", "cloud", "auth"}
 	if got := ApplyOrder(in); !slices.Equal(got, want) {
 		t.Errorf("ApplyOrder = %v, want %v", got, want)
 	}

@@ -25,6 +25,42 @@ func TestDiffInSync(t *testing.T) {
 	}
 }
 
+// active_between is a string array. The renderer emits []any (matching the
+// device's JSON-decoded []interface{}), so a matching schedule must NOT drift.
+func TestDiffUIActiveBetweenNoFalseDrift(t *testing.T) {
+	desired := map[string]map[string]any{
+		"pluguk_ui": {"leds": map[string]any{"night_mode": map[string]any{"active_between": []any{"22:00", "07:00"}}}},
+	}
+	actual := rawConfig(t, map[string]any{
+		"pluguk_ui": map[string]any{"leds": map[string]any{"night_mode": map[string]any{"active_between": []any{"22:00", "07:00"}}}},
+	})
+	findings, err := Diff(desired, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected in sync, got %+v", findings)
+	}
+}
+
+// ...but a genuinely different schedule must be detected (proves the array
+// comparison is not trivially always-equal).
+func TestDiffUIActiveBetweenDetectsDrift(t *testing.T) {
+	desired := map[string]map[string]any{
+		"pluguk_ui": {"leds": map[string]any{"night_mode": map[string]any{"active_between": []any{"22:00", "07:00"}}}},
+	}
+	actual := rawConfig(t, map[string]any{
+		"pluguk_ui": map[string]any{"leds": map[string]any{"night_mode": map[string]any{"active_between": []any{"23:00", "06:00"}}}},
+	})
+	findings, err := Diff(desired, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding for changed schedule, got %+v", findings)
+	}
+}
+
 func TestDiffFindsDriftedLeaves(t *testing.T) {
 	desired := map[string]map[string]any{
 		"sys":      {"device": map[string]any{"eco_mode": true, "name": "rack-pdu"}},

@@ -16,8 +16,9 @@ from Secrets, non-convergence damping); the shelly_exporter device-list
 ConfigMap feed (`--exporter-configmap`); and a read-only dashboard
 (`--dashboard-bind`, default :8090) showing fleet state, per-device drift
 diffs, and profile matching; and wifi management (`spec.config.wifi` with
-sta/sta1 networks and passwords from Secrets). MQTT credentials and
-firmware updates are not implemented.
+sta/sta1 networks and passwords from Secrets); firmware auto-update; and
+switch, system, BLE, and plug-UI/LED sections. MQTT credentials are not
+implemented.
 
 ## Description
 
@@ -58,6 +59,25 @@ Caution: a firmware update reboots the device, and after reboot a
 switch output follows its `initial_state` -- with `initial_state: off`
 the load stays off until something turns it back on. Consider managing
 `spec.config.switch.initialState: restore_last` alongside auto-update.
+
+### Device UI (LED ring, night mode, button)
+
+`spec.config.ui` manages a plug's LED ring and physical button on models
+that expose a `*_ui` component (e.g. PlusPlugUK's `pluguk_ui`); it is a
+no-op on devices without one (such as the wired 1PM relays). Fields:
+`ledMode` (`power` | `switch` | `off`), `nightMode` (`enable`,
+`brightness` 0-100, `activeBetween: ["HH:MM","HH:MM"]` in device-local
+time), and `buttonInMode` (`momentary` | `follow` | `flip` | `detached`).
+LED colours are intentionally not managed. The operator discovers the
+device's `*_ui` component and applies via `<component>.SetConfig`.
+
+### Other config sections
+
+`spec.config.switch` also covers protection limits: `powerLimit`,
+`voltageLimit`, `currentLimit` (all in their native units), and
+`autorecoverVoltageErrors`. `spec.config.ble.enable` toggles Bluetooth.
+`spec.config.system.timezone` sets `sys.location.tz` (alongside
+`ecoMode`); it governs schedule and LED night-mode local-time windows.
 
 ## Install (Helm)
 

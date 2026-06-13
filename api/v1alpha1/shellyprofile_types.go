@@ -166,6 +166,18 @@ type SwitchSection struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	PowerLimit *int32 `json:"powerLimit,omitempty"`
+	// VoltageLimit in volts; the switch turns off above it.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	VoltageLimit *int32 `json:"voltageLimit,omitempty"`
+	// CurrentLimit in amps; the switch turns off above it.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	CurrentLimit *int32 `json:"currentLimit,omitempty"`
+	// AutorecoverVoltageErrors controls whether the switch automatically
+	// re-enables itself after a voltage-limit trip.
+	// +optional
+	AutorecoverVoltageErrors *bool `json:"autorecoverVoltageErrors,omitempty"`
 }
 
 // WifiSection maps to the device's wifi configuration. Only the sta

@@ -52,6 +52,46 @@ func TestRenderSections(t *testing.T) {
 	}
 }
 
+func TestRenderSwitchProtectionLimits(t *testing.T) {
+	vl := int32(260)
+	cl := int32(16)
+	ar := true
+	cfg := shellyv1alpha1.ProfileConfig{
+		Switch: &shellyv1alpha1.SwitchSection{
+			VoltageLimit:             &vl,
+			CurrentLimit:             &cl,
+			AutorecoverVoltageErrors: &ar,
+		},
+	}
+	actual := rawConfig(t, map[string]any{
+		"switch:0": map[string]any{},
+		"switch:1": map[string]any{},
+	})
+	got := Render(cfg, "", actual)
+
+	wantPerSwitch := map[string]any{
+		"voltage_limit":              float64(260),
+		"current_limit":              float64(16),
+		"autorecover_voltage_errors": true,
+	}
+	for _, comp := range []string{"switch:0", "switch:1"} {
+		if !reflect.DeepEqual(got[comp], wantPerSwitch) {
+			t.Errorf("Render()[%q] = %#v, want %#v", comp, got[comp], wantPerSwitch)
+		}
+	}
+}
+
+func TestRenderSwitchProtectionLimitsNilUnmanaged(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		Switch: &shellyv1alpha1.SwitchSection{},
+	}
+	actual := rawConfig(t, map[string]any{"switch:0": map[string]any{}})
+	got := Render(cfg, "", actual)
+	if len(got) != 0 {
+		t.Errorf("empty switch section must render nothing, got %v", got)
+	}
+}
+
 func TestRenderOmittedSectionsUnmanaged(t *testing.T) {
 	got := Render(shellyv1alpha1.ProfileConfig{}, "", nil)
 	if len(got) != 0 {

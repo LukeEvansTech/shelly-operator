@@ -820,6 +820,34 @@ func TestEnforceSwitchConfig(t *testing.T) {
 	}
 }
 
+func TestEnforceSwitchProtectionLimits(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev34", MAC: "AABBCCDDEE3E", Gen: 2, InitialConfig: map[string]map[string]any{
+		"switch:0": {"voltage_limit": float64(0), "current_limit": float64(0), "autorecover_voltage_errors": false},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE3E", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		Switch: &shellyv1alpha1.SwitchSection{
+			VoltageLimit:             ptrInt32(260),
+			CurrentLimit:             ptrInt32(16),
+			AutorecoverVoltageErrors: boolPtr(true),
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee3e")
+	cfg := fake.ConfigSnapshot()["switch:0"]
+	if cfg["voltage_limit"] != float64(260) || cfg["current_limit"] != float64(16) || cfg["autorecover_voltage_errors"] != true {
+		t.Errorf("switch:0 protection limits not enforced: %v", cfg)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want True", cond)
+	}
+}
+
 func createWifiSecret(t *testing.T, ns string) {
 	t.Helper()
 	s := &corev1.Secret{

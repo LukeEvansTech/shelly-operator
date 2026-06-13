@@ -154,6 +154,17 @@ spec:
                         format: int32
                         minimum: 0
                         type: integer
+                      autorecoverVoltageErrors:
+                        description: |-
+                          AutorecoverVoltageErrors controls whether the switch automatically
+                          re-enables itself after a voltage-limit trip.
+                        type: boolean
+                      currentLimit:
+                        description: CurrentLimit in amps; the switch turns off above
+                          it.
+                        format: int32
+                        minimum: 0
+                        type: integer
                       initialState:
                         description: InitialState is the output state after power-on.
                         enum:
@@ -164,6 +175,12 @@ spec:
                         type: string
                       powerLimit:
                         description: PowerLimit in watts; the switch turns off above
+                          it.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      voltageLimit:
+                        description: VoltageLimit in volts; the switch turns off above
                           it.
                         format: int32
                         minimum: 0

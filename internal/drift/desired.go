@@ -85,6 +85,15 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		if cfg.Switch.PowerLimit != nil {
 			sw["power_limit"] = float64(*cfg.Switch.PowerLimit)
 		}
+		if cfg.Switch.VoltageLimit != nil {
+			sw["voltage_limit"] = float64(*cfg.Switch.VoltageLimit)
+		}
+		if cfg.Switch.CurrentLimit != nil {
+			sw["current_limit"] = float64(*cfg.Switch.CurrentLimit)
+		}
+		if cfg.Switch.AutorecoverVoltageErrors != nil {
+			sw["autorecover_voltage_errors"] = *cfg.Switch.AutorecoverVoltageErrors
+		}
 		if len(sw) > 0 {
 			for comp := range actual {
 				if strings.HasPrefix(comp, "switch:") {

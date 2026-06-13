@@ -8,10 +8,11 @@ import (
 // ApplyOrder returns drifted sections sorted safest-first for enforcement:
 // sys, then switch components and *_ui (plug LED/button -- harmless to
 // connectivity), then mqtt, then cloud, ble, and ws (outbound WebSocket --
-// connectivity-harmless), then firmware; auth second-to-last (it changes
-// how the controller must talk to the device) and wifi always dead last
-// (it can move the device to another network, dropping connectivity at its
-// current address -- nothing can be applied after it). Unknown sections
+// connectivity-harmless), then firmware and schedule (both pseudo-sections
+// backed by Schedule RPCs -- harmless to connectivity); auth second-to-last
+// (it changes how the controller must talk to the device) and wifi always
+// dead last (it can move the device to another network, dropping connectivity
+// at its current address -- nothing can be applied after it). Unknown sections
 // sort after ws but before auth. The input is not mutated.
 func ApplyOrder(sections []string) []string {
 	rank := func(s string) int {
@@ -34,6 +35,10 @@ func ApplyOrder(sections []string) []string {
 		case s == "firmware":
 			// Pseudo-section (schedule-job writes); harmless to
 			// connectivity, applied with the ordinary sections.
+			return 4
+		case s == "schedule":
+			// Pseudo-section (schedule-job writes); harmless to
+			// connectivity, ranked alongside firmware.
 			return 4
 		case s == "auth":
 			return 100

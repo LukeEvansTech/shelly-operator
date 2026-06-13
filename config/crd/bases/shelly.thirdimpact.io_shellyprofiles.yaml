@@ -81,6 +81,13 @@ spec:
                         - name
                         type: object
                     type: object
+                  ble:
+                    description: BLESection maps to the device's ble (Bluetooth Low
+                      Energy) configuration.
+                    properties:
+                      enable:
+                        type: boolean
+                    type: object
                   cloud:
                     description: CloudSection maps to the device's cloud configuration.
                     properties:
@@ -193,6 +200,11 @@ spec:
                         description: EcoMode toggles the device's power-saving mode
                           (sys.device.eco_mode).
                         type: boolean
+                      timezone:
+                        description: |-
+                          Timezone sets the device's local timezone (sys.location.tz), e.g.
+                          "Europe/London". See the Shelly API docs for the accepted tz strings.
+                        type: string
                     type: object
                   wifi:
                     description: |-

@@ -22,15 +22,8 @@ import (
 func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[string]json.RawMessage) map[string]map[string]any {
 	out := map[string]map[string]any{}
 
-	device := map[string]any{}
-	if cfg.System != nil && cfg.System.EcoMode != nil {
-		device["eco_mode"] = *cfg.System.EcoMode
-	}
-	if cfg.Name != nil && cfg.Name.Managed && desiredName != "" {
-		device["name"] = desiredName
-	}
-	if len(device) > 0 {
-		out["sys"] = map[string]any{"device": device}
+	if sys := renderSys(cfg.System, cfg.Name, desiredName); len(sys) > 0 {
+		out["sys"] = sys
 	}
 
 	if cfg.MQTT != nil {
@@ -50,6 +43,10 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 
 	if cfg.Cloud != nil && cfg.Cloud.Enable != nil {
 		out["cloud"] = map[string]any{"enable": *cfg.Cloud.Enable}
+	}
+
+	if cfg.BLE != nil && cfg.BLE.Enable != nil {
+		out["ble"] = map[string]any{"enable": *cfg.BLE.Enable}
 	}
 
 	if cfg.Wifi != nil {
@@ -105,6 +102,28 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		}
 	}
 
+	return out
+}
+
+// renderSys builds the desired "sys" component map from the system and name
+// sections. Fields are nested under their correct sub-object (device for
+// eco_mode and name, location for tz) so that a partial sys map is safe:
+// Shelly's SetConfig deep-merges, and Diff compares only declared leaves.
+func renderSys(sys *shellyv1alpha1.SystemSection, name *shellyv1alpha1.NameSection, desiredName string) map[string]any {
+	out := map[string]any{}
+	device := map[string]any{}
+	if sys != nil && sys.EcoMode != nil {
+		device["eco_mode"] = *sys.EcoMode
+	}
+	if name != nil && name.Managed && desiredName != "" {
+		device["name"] = desiredName
+	}
+	if len(device) > 0 {
+		out["device"] = device
+	}
+	if sys != nil && sys.Timezone != nil {
+		out["location"] = map[string]any{"tz": *sys.Timezone}
+	}
 	return out
 }
 

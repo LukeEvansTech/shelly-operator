@@ -141,3 +141,77 @@ func TestRenderWifiEmptyAndNil(t *testing.T) {
 		t.Fatalf("pass-only network must render nothing, got %#v", got["wifi"])
 	}
 }
+
+func TestRenderBLEEnable(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		BLE: &shellyv1alpha1.BLESection{Enable: ptr(true)},
+	}
+	got := Render(cfg, "", nil)
+	want := map[string]any{"enable": true}
+	if !reflect.DeepEqual(got["ble"], want) {
+		t.Errorf("ble = %#v, want %#v", got["ble"], want)
+	}
+}
+
+func TestRenderBLENilUnmanaged(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{BLE: &shellyv1alpha1.BLESection{}}
+	got := Render(cfg, "", nil)
+	if got["ble"] != nil {
+		t.Errorf("nil BLE.Enable must render nothing, got %#v", got["ble"])
+	}
+}
+
+func TestRenderSysTimezone(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{Timezone: ptr("Europe/London")},
+	}
+	got := Render(cfg, "", nil)
+	wantSys := map[string]any{"location": map[string]any{"tz": "Europe/London"}}
+	if !reflect.DeepEqual(got["sys"], wantSys) {
+		t.Errorf("sys = %#v, want %#v", got["sys"], wantSys)
+	}
+}
+
+func TestRenderSysBothEcoModeAndTimezone(t *testing.T) {
+	// Setting both must not drop either sub-object.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			EcoMode:  ptr(true),
+			Timezone: ptr("America/New_York"),
+		},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	device, okD := sys["device"].(map[string]any)
+	location, okL := sys["location"].(map[string]any)
+	if !okD || device["eco_mode"] != true {
+		t.Errorf("sys.device = %#v, want eco_mode=true", sys["device"])
+	}
+	if !okL || location["tz"] != "America/New_York" {
+		t.Errorf("sys.location = %#v, want tz=America/New_York", sys["location"])
+	}
+}
+
+func TestRenderSysTimezoneDoesNotClobberEcoMode(t *testing.T) {
+	// When only timezone is declared, the device sub-map must be absent.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{Timezone: ptr("UTC")},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	if _, hasDevice := sys["device"]; hasDevice {
+		t.Errorf("timezone-only render must not include device sub-map, got %#v", sys)
+	}
+}
+
+func TestRenderSysEcoModeDoesNotClobberTimezone(t *testing.T) {
+	// When only eco_mode is declared, the location sub-map must be absent.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: ptr(false)},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	if _, hasLocation := sys["location"]; hasLocation {
+		t.Errorf("eco_mode-only render must not include location sub-map, got %#v", sys)
+	}
+}

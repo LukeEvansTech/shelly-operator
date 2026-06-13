@@ -1304,3 +1304,117 @@ func TestFirmwareUnmanagedSkipsScheduleRPC(t *testing.T) {
 		}
 	}
 }
+
+func TestEnforceBLEEnable(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devble1", MAC: "AABBCCDDF001", Gen: 2, InitialConfig: map[string]map[string]any{
+		"ble": {"enable": false},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDF001", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		BLE: &shellyv1alpha1.BLESection{Enable: boolPtr(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddf001")
+
+	if got := fake.ConfigSnapshot()["ble"]["enable"]; got != true {
+		t.Errorf("device ble.enable = %v, want true (enforced)", got)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after BLE enforce = %+v, want True", cond)
+	}
+	sawBLESet := false
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "BLE.SetConfig" {
+			sawBLESet = true
+		}
+	}
+	if !sawBLESet {
+		t.Error("expected BLE.SetConfig call")
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestEnforceSysTimezone(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devtz1", MAC: "AABBCCDDF002", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {
+			"device":   map[string]any{"eco_mode": false},
+			"location": map[string]any{"tz": "UTC"},
+		},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDF002", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{Timezone: strPtr("Europe/London")},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddf002")
+
+	snap := fake.ConfigSnapshot()["sys"]
+	loc, ok := snap["location"].(map[string]any)
+	if !ok || loc["tz"] != "Europe/London" {
+		t.Errorf("sys.location = %#v, want tz=Europe/London", snap["location"])
+	}
+	// eco_mode untouched (not declared in profile).
+	dev2Device, ok2 := snap["device"].(map[string]any)
+	if !ok2 || dev2Device["eco_mode"] != false {
+		t.Errorf("sys.device should be untouched, got %#v", snap["device"])
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after timezone enforce = %+v, want True", cond)
+	}
+	sawSysSet := false
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "Sys.SetConfig" {
+			sawSysSet = true
+		}
+	}
+	if !sawSysSet {
+		t.Error("expected Sys.SetConfig call for timezone")
+	}
+}
+
+func TestEnforceSysTimezoneAndEcoModeTogether(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devtz2", MAC: "AABBCCDDF003", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {
+			"device":   map[string]any{"eco_mode": false},
+			"location": map[string]any{"tz": "UTC"},
+		},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDF003", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			EcoMode:  boolPtr(true),
+			Timezone: strPtr("America/New_York"),
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddf003")
+
+	snap := fake.ConfigSnapshot()["sys"]
+	device, okD := snap["device"].(map[string]any)
+	location, okL := snap["location"].(map[string]any)
+	if !okD || device["eco_mode"] != true {
+		t.Errorf("sys.device.eco_mode = %v, want true", snap["device"])
+	}
+	if !okL || location["tz"] != "America/New_York" {
+		t.Errorf("sys.location.tz = %v, want America/New_York", snap["location"])
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition = %+v, want True", cond)
+	}
+}

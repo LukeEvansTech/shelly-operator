@@ -75,6 +75,8 @@ type ProfileConfig struct {
 	// +optional
 	Cloud *CloudSection `json:"cloud,omitempty"`
 	// +optional
+	BLE *BLESection `json:"ble,omitempty"`
+	// +optional
 	Auth *AuthSection `json:"auth,omitempty"`
 	// +optional
 	Switch *SwitchSection `json:"switch,omitempty"`
@@ -89,6 +91,10 @@ type SystemSection struct {
 	// EcoMode toggles the device's power-saving mode (sys.device.eco_mode).
 	// +optional
 	EcoMode *bool `json:"ecoMode,omitempty"`
+	// Timezone sets the device's local timezone (sys.location.tz), e.g.
+	// "Europe/London". See the Shelly API docs for the accepted tz strings.
+	// +optional
+	Timezone *string `json:"timezone,omitempty"`
 }
 
 // NameSection enables device-name management.
@@ -114,6 +120,12 @@ type MQTTSection struct {
 
 // CloudSection maps to the device's cloud configuration.
 type CloudSection struct {
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+}
+
+// BLESection maps to the device's ble (Bluetooth Low Energy) configuration.
+type BLESection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`
 }

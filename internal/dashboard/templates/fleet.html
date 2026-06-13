@@ -2,11 +2,13 @@
 <h1>Fleet</h1>
 <p class="muted">{{len .Devices}} devices. Read-only: changes go through git.</p>
 <table>
-<tr><th>Device</th><th>Name</th><th>Model</th><th>Address</th><th>Online</th><th>Update</th><th>Profile</th><th>In Sync</th><th>Drift</th></tr>
+<tr><th>Device</th><th>Name</th><th>Room</th><th>Type</th><th>Model</th><th>Address</th><th>Online</th><th>Update</th><th>Profile</th><th>In Sync</th><th>Drift</th></tr>
 {{range .Devices}}
 <tr>
 <td><a href="/device/{{.Object}}">{{.Object}}</a></td>
 <td>{{.Name}}</td>
+<td>{{.Room}}</td>
+<td>{{.Type}}</td>
 <td>{{.Model}}</td>
 <td>{{.Address}}</td>
 <td>{{if .Online}}<span class="pill ok">online</span>{{else}}<span class="pill bad">offline</span>{{end}}</td>

@@ -1,0 +1,28 @@
+# shelly-registry ConfigMap -- per-device inventory metadata.
+#
+# Keys are the ShellyDevice object names (lowercased MAC, no separators).
+# Each value is a JSON object with optional fields:
+#
+#   name  -- desired device name (overrides shelly-names map, but spec.displayName still wins)
+#   room  -- physical room; stamped as label shelly.thirdimpact.io/room (sanitized)
+#   type  -- appliance category, e.g. "Lamp" or "Socket"; stamped as
+#             label shelly.thirdimpact.io/appliance (sanitized)
+#   note  -- free-text note; stamped as annotation shelly.thirdimpact.io/note
+#
+# Room and appliance labels can be used in ShellyProfile selectors to target
+# groups, e.g. "all lamps in the lounge":
+#
+#   selector:
+#     matchLabels:
+#       shelly.thirdimpact.io/room: lounge
+#       shelly.thirdimpact.io/appliance: lamp
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shelly-registry
+  namespace: default
+data:
+  # Replace keys with real lowercased MACs from your fleet.
+  aabbccddee01: '{"name":"lounge-lamp-1","room":"Lounge","type":"Lamp","note":"Floor lamp next to sofa"}'
+  aabbccddee02: '{"name":"kitchen-socket","room":"Kitchen","type":"Socket","note":"Counter socket for appliances"}'

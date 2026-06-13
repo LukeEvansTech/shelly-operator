@@ -75,6 +75,40 @@ func TestServerIsNotLeaderElected(t *testing.T) {
 	}
 }
 
+// TestFleetShowsRoomAndType verifies that Room and Type columns in the fleet
+// table are populated from the device's registry labels.
+func TestFleetShowsRoomAndType(t *testing.T) {
+	ns := newNamespace(t)
+	ctx := context.Background()
+	dev := &shellyv1alpha1.ShellyDevice{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: ns, Name: "aabbccddef30",
+			Labels: map[string]string{
+				shellyv1alpha1.LabelModel:     "SNPL-00112UK",
+				shellyv1alpha1.LabelApp:       "PlusPlugUK",
+				shellyv1alpha1.LabelGen:       "2",
+				shellyv1alpha1.LabelRoom:      "lounge",
+				shellyv1alpha1.LabelAppliance: "lamp",
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+	dev.Status = shellyv1alpha1.ShellyDeviceStatus{Address: "10.0.0.30", Online: true}
+	if err := k8sClient.Status().Update(ctx, dev); err != nil {
+		t.Fatal(err)
+	}
+
+	_, body := get(t, newServer(ns), "/")
+	if !strings.Contains(body, "lounge") {
+		t.Errorf("fleet page missing room 'lounge':\n%s", body)
+	}
+	if !strings.Contains(body, "lamp") {
+		t.Errorf("fleet page missing type 'lamp':\n%s", body)
+	}
+}
+
 func TestFleetShowsAvailableUpdate(t *testing.T) {
 	ns := newNamespace(t)
 	dev := &shellyv1alpha1.ShellyDevice{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "aabbccddef20"}}

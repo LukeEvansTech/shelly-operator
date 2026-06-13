@@ -215,3 +215,208 @@ func TestRenderSysEcoModeDoesNotClobberTimezone(t *testing.T) {
 		t.Errorf("eco_mode-only render must not include location sub-map, got %#v", sys)
 	}
 }
+
+// ---- UI section tests -------------------------------------------------------
+
+func plugActual(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	return rawConfig(t, map[string]any{
+		"sys":      map[string]any{},
+		"switch:0": map[string]any{},
+		"pluguk_ui": map[string]any{
+			"leds": map[string]any{
+				"mode": "power",
+				"night_mode": map[string]any{
+					"enable":         false,
+					"brightness":     100,
+					"active_between": []any{"22:00", "07:00"},
+				},
+			},
+			"controls": map[string]any{
+				"switch:0": map[string]any{"in_mode": "momentary"},
+			},
+		},
+	})
+}
+
+func relayActual(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	return rawConfig(t, map[string]any{
+		"sys":      map[string]any{},
+		"switch:0": map[string]any{},
+		"switch:1": map[string]any{},
+		// no *_ui key -- relay device
+	})
+}
+
+func TestRenderUILEDMode(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{LEDMode: ptr("switch")},
+	}
+	got := Render(cfg, "", plugActual(t))
+	ui, ok := got["pluguk_ui"]
+	if !ok {
+		t.Fatalf("expected pluguk_ui in output, got keys %v", keys(got))
+	}
+	leds, ok := ui["leds"].(map[string]any)
+	if !ok {
+		t.Fatalf("leds not a map: %#v", ui["leds"])
+	}
+	if leds["mode"] != "switch" {
+		t.Errorf("leds.mode = %v, want switch", leds["mode"])
+	}
+	// night_mode and controls must be absent (not declared).
+	if _, has := leds["night_mode"]; has {
+		t.Errorf("night_mode must not be rendered when not declared")
+	}
+	if _, has := ui["controls"]; has {
+		t.Errorf("controls must not be rendered when buttonInMode not declared")
+	}
+}
+
+func TestRenderUIFullSection(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			LEDMode: ptr("off"),
+			NightMode: &shellyv1alpha1.NightMode{
+				Enable:        ptr(true),
+				Brightness:    ptr(int32(30)),
+				ActiveBetween: []string{"23:00", "06:30"},
+			},
+			ButtonInMode: ptr("detached"),
+		},
+	}
+	got := Render(cfg, "", plugActual(t))
+	ui := got["pluguk_ui"]
+	if ui == nil {
+		t.Fatalf("expected pluguk_ui, got nil")
+	}
+
+	leds, _ := ui["leds"].(map[string]any)
+	if leds["mode"] != "off" {
+		t.Errorf("leds.mode = %v, want off", leds["mode"])
+	}
+	nm, _ := leds["night_mode"].(map[string]any)
+	if nm["enable"] != true {
+		t.Errorf("night_mode.enable = %v, want true", nm["enable"])
+	}
+	if nm["brightness"] != float64(30) {
+		t.Errorf("night_mode.brightness = %v, want 30.0", nm["brightness"])
+	}
+	ab, _ := nm["active_between"].([]any)
+	if len(ab) != 2 || ab[0] != "23:00" || ab[1] != "06:30" {
+		t.Errorf("night_mode.active_between = %v, want [23:00 06:30]", nm["active_between"])
+	}
+
+	controls, ok := ui["controls"].(map[string]any)
+	if !ok {
+		t.Fatalf("controls not a map: %#v", ui["controls"])
+	}
+	sw0, _ := controls["switch:0"].(map[string]any)
+	if sw0["in_mode"] != "detached" {
+		t.Errorf("controls.switch:0.in_mode = %v, want detached", sw0["in_mode"])
+	}
+}
+
+func TestRenderUIActiveBetweenIsAnySlice(t *testing.T) {
+	// active_between must be []any (not []string) so DeepEqual matches
+	// the device's JSON-decoded value (which is also []interface{}).
+	cfg := shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			NightMode: &shellyv1alpha1.NightMode{
+				ActiveBetween: []string{"22:00", "07:00"},
+			},
+		},
+	}
+	got := Render(cfg, "", plugActual(t))
+	leds := got["pluguk_ui"]["leds"].(map[string]any)
+	nm := leds["night_mode"].(map[string]any)
+	ab := nm["active_between"]
+	if _, isAny := ab.([]any); !isAny {
+		t.Errorf("active_between must be []any, got %T: %v", ab, ab)
+	}
+}
+
+func TestRenderUINoFalseDriftActiveBetween(t *testing.T) {
+	// Simulate: device returns {"active_between":["22:00","07:00"]} decoded
+	// from JSON as []interface{}. The rendered []any must match via DeepEqual.
+	cfg := shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			NightMode: &shellyv1alpha1.NightMode{
+				ActiveBetween: []string{"22:00", "07:00"},
+			},
+		},
+	}
+	got := Render(cfg, "", plugActual(t))
+	leds := got["pluguk_ui"]["leds"].(map[string]any)
+	nm := leds["night_mode"].(map[string]any)
+	rendered := nm["active_between"]
+
+	// Decode the same value from JSON (simulates what the device returns).
+	raw, _ := json.Marshal([]string{"22:00", "07:00"})
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	// JSON unmarshal of an array produces []interface{}.
+	if !reflect.DeepEqual(rendered, decoded) {
+		t.Errorf("rendered %T(%v) != JSON-decoded %T(%v); would produce false drift", rendered, rendered, decoded, decoded)
+	}
+}
+
+func TestRenderUIOnlyNightMode(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			NightMode: &shellyv1alpha1.NightMode{Enable: ptr(false)},
+		},
+	}
+	got := Render(cfg, "", plugActual(t))
+	ui := got["pluguk_ui"]
+	if ui == nil {
+		t.Fatalf("expected pluguk_ui")
+	}
+	leds, _ := ui["leds"].(map[string]any)
+	if _, hasMode := leds["mode"]; hasMode {
+		t.Errorf("mode must not be emitted when LEDMode is nil")
+	}
+	nm, _ := leds["night_mode"].(map[string]any)
+	if nm["enable"] != false {
+		t.Errorf("night_mode.enable = %v, want false", nm["enable"])
+	}
+	if _, hasControls := ui["controls"]; hasControls {
+		t.Errorf("controls must not be emitted when buttonInMode is nil")
+	}
+}
+
+func TestRenderUIRelayDeviceNoOp(t *testing.T) {
+	// Relay device has no *_ui key -- UI section must produce nothing.
+	cfg := shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			LEDMode: ptr("power"),
+		},
+	}
+	got := Render(cfg, "", relayActual(t))
+	for k := range got {
+		if strings.HasSuffix(k, "_ui") {
+			t.Errorf("relay device must not produce a *_ui entry, got key %q", k)
+		}
+	}
+}
+
+func TestRenderUINilUnmanaged(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{UI: &shellyv1alpha1.UISection{}}
+	got := Render(cfg, "", plugActual(t))
+	for k := range got {
+		if strings.HasSuffix(k, "_ui") {
+			t.Errorf("empty UI section must render nothing, got key %q", k)
+		}
+	}
+}
+
+func keys(m map[string]map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

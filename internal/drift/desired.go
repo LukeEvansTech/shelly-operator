@@ -3,10 +3,14 @@ package drift
 import (
 	"encoding/json"
 	"maps"
+	"regexp"
 	"strings"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 )
+
+// uiKeyRe matches the component key for plug UI config (e.g. "pluguk_ui").
+var uiKeyRe = regexp.MustCompile(`^[a-z0-9]+_ui$`)
 
 // Render maps a profile's declared config onto the device's component
 // namespace ("sys", "mqtt", "switch:0", ...). Only declared fields are
@@ -102,6 +106,129 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		}
 	}
 
+	if cfg.UI != nil {
+		if uiKey := discoverUIKey(actual); uiKey != "" {
+			if uiMap := renderUI(cfg.UI, actual[uiKey]); len(uiMap) > 0 {
+				out[uiKey] = uiMap
+			}
+		}
+	}
+
+	return out
+}
+
+// discoverUIKey finds the first component key in actual that matches the
+// ^[a-z0-9]+_ui$ pattern (e.g. "pluguk_ui"). Returns "" when none exists,
+// making this section a no-op for relay devices.
+func discoverUIKey(actual map[string]json.RawMessage) string {
+	for k := range actual {
+		if uiKeyRe.MatchString(k) {
+			return k
+		}
+	}
+	return ""
+}
+
+// renderUI builds the desired map for a plug's *_ui component. Only
+// declared fields are emitted. actualRaw is the device's current *_ui
+// JSON (used to enumerate existing switch controls for buttonInMode).
+func renderUI(ui *shellyv1alpha1.UISection, actualRaw json.RawMessage) map[string]any {
+	out := map[string]any{}
+
+	leds := renderUILeds(ui)
+	if len(leds) > 0 {
+		out["leds"] = leds
+	}
+
+	if ui.ButtonInMode != nil {
+		controls := renderUIControls(*ui.ButtonInMode, actualRaw)
+		if len(controls) > 0 {
+			out["controls"] = controls
+		}
+	}
+
+	return out
+}
+
+// renderUILeds builds the desired leds sub-map. Only declared leaves are
+// emitted so a partial update is safe with Shelly's deep-merge SetConfig.
+func renderUILeds(ui *shellyv1alpha1.UISection) map[string]any {
+	leds := map[string]any{}
+
+	if ui.LEDMode != nil {
+		leds["mode"] = *ui.LEDMode
+	}
+
+	if ui.NightMode != nil {
+		nm := renderNightMode(ui.NightMode)
+		if len(nm) > 0 {
+			leds["night_mode"] = nm
+		}
+	}
+
+	return leds
+}
+
+// renderNightMode builds the desired night_mode sub-map. brightness is
+// emitted as float64 (JSON-normalized) so Diff's leafEqual compares it
+// correctly against the device's decoded number. active_between is emitted
+// as []any (not []string) so reflect.DeepEqual matches the device's
+// JSON-decoded []interface{} and produces no false drift.
+func renderNightMode(nm *shellyv1alpha1.NightMode) map[string]any {
+	out := map[string]any{}
+	if nm.Enable != nil {
+		out["enable"] = *nm.Enable
+	}
+	if nm.Brightness != nil {
+		out["brightness"] = float64(*nm.Brightness)
+	}
+	if len(nm.ActiveBetween) > 0 {
+		ab := make([]any, len(nm.ActiveBetween))
+		for i, s := range nm.ActiveBetween {
+			ab[i] = s
+		}
+		out["active_between"] = ab
+	}
+	return out
+}
+
+// renderUIControls builds the desired controls sub-map. It enumerates the
+// switch:N keys that the device already exposes under its *_ui component's
+// "controls" object. If the controls object is absent or unparseable, it
+// defaults to switch:0, which is correct for all single-switch plug models.
+func renderUIControls(inMode string, actualRaw json.RawMessage) map[string]any {
+	switchKeys := uiControlSwitchKeys(actualRaw)
+	if len(switchKeys) == 0 {
+		switchKeys = []string{"switch:0"}
+	}
+	controls := make(map[string]any, len(switchKeys))
+	for _, k := range switchKeys {
+		controls[k] = map[string]any{"in_mode": inMode}
+	}
+	return controls
+}
+
+// uiControlSwitchKeys extracts the switch:N key names from the "controls"
+// object in the device's *_ui JSON. Returns nil when the data is absent or
+// not in the expected shape; the caller falls back to ["switch:0"].
+func uiControlSwitchKeys(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v map[string]any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	controls, _ := v["controls"].(map[string]any)
+	if len(controls) == 0 {
+		return nil
+	}
+	var out []string
+	for k := range controls {
+		if strings.HasPrefix(k, "switch:") {
+			out = append(out, k)
+		}
+	}
 	return out
 }
 

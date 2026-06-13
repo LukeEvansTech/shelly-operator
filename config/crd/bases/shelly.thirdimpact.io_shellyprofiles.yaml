@@ -206,6 +206,61 @@ spec:
                           "Europe/London". See the Shelly API docs for the accepted tz strings.
                         type: string
                     type: object
+                  ui:
+                    description: |-
+                      UI manages the plug LED ring and physical button on plug models that
+                      expose a *_ui component (e.g. PlusPlugUK). Relay-only devices that
+                      have no *_ui component in their config are unaffected; this section
+                      is a no-op for them.
+                    properties:
+                      buttonInMode:
+                        description: |-
+                          ButtonInMode controls the physical button behaviour.
+                          momentary = press-and-release toggles,
+                          follow = output tracks button state,
+                          flip = each press toggles,
+                          detached = button does not affect the relay.
+                        enum:
+                        - momentary
+                        - follow
+                        - flip
+                        - detached
+                        type: string
+                      ledMode:
+                        description: |-
+                          LEDMode controls what the LED ring displays.
+                          power = brightness tracks power consumption,
+                          switch = on/off state,
+                          off = always off.
+                        enum:
+                        - power
+                        - switch
+                        - "off"
+                        type: string
+                      nightMode:
+                        description: NightMode configures the LED night-mode dimming
+                          schedule.
+                        properties:
+                          activeBetween:
+                            description: |-
+                              ActiveBetween is a [start, end] pair of "HH:MM" 24-hour local times
+                              that bound the night-mode window.
+                            items:
+                              type: string
+                            maxItems: 2
+                            type: array
+                          brightness:
+                            description: Brightness is the LED brightness percentage
+                              during night mode (0-100).
+                            format: int32
+                            maximum: 100
+                            minimum: 0
+                            type: integer
+                          enable:
+                            description: Enable turns night-mode dimming on or off.
+                            type: boolean
+                        type: object
+                    type: object
                   wifi:
                     description: |-
                       WifiSection maps to the device's wifi configuration. Only the sta

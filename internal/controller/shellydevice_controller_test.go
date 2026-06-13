@@ -1383,6 +1383,179 @@ func TestEnforceSysTimezone(t *testing.T) {
 	}
 }
 
+// ---- UI section envtests ---------------------------------------------------
+
+// plugUIInitialConfig returns an InitialConfig for a PlusPlugUK device with
+// a pluguk_ui component in its starting state.
+func plugUIInitialConfig(ledMode, inMode string) map[string]map[string]any {
+	return map[string]map[string]any{
+		"sys":      {"device": map[string]any{"eco_mode": false}},
+		"switch:0": {"auto_off": false},
+		"pluguk_ui": {
+			"leds": map[string]any{
+				"mode": ledMode,
+				"night_mode": map[string]any{
+					"enable":         false,
+					"brightness":     float64(100),
+					"active_between": []any{"22:00", "07:00"},
+				},
+			},
+			"controls": map[string]any{
+				"switch:0": map[string]any{"in_mode": inMode},
+			},
+		},
+	}
+}
+
+func TestEnforceUILEDModeAndButton(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{
+		ID: "devui1", MAC: "AABBCCDDEE50", Gen: 2,
+		InitialConfig: plugUIInitialConfig("power", "momentary"),
+	}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE50", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			LEDMode:      strPtr("off"),
+			ButtonInMode: strPtr("detached"),
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee50")
+
+	snap := fake.ConfigSnapshot()["pluguk_ui"]
+	leds, ok := snap["leds"].(map[string]any)
+	if !ok || leds["mode"] != "off" {
+		t.Errorf("pluguk_ui.leds.mode = %v, want off", leds["mode"])
+	}
+	controls, ok2 := snap["controls"].(map[string]any)
+	if !ok2 {
+		t.Fatalf("controls not a map: %#v", snap["controls"])
+	}
+	sw0, _ := controls["switch:0"].(map[string]any)
+	if sw0["in_mode"] != "detached" {
+		t.Errorf("controls.switch:0.in_mode = %v, want detached", sw0["in_mode"])
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after UI enforce = %+v, want True", cond)
+	}
+	// Verify the RPC was PLUGUK_UI.SetConfig (uppercase fallback path).
+	sawUISet := false
+	for _, call := range fake.RecordedCalls() {
+		if strings.EqualFold(call.Method, "pluguk_ui.SetConfig") {
+			sawUISet = true
+		}
+	}
+	if !sawUISet {
+		calls := fake.RecordedCalls()
+		t.Errorf("expected PLUGUK_UI.SetConfig call, saw %v", calls)
+	}
+}
+
+func TestEnforceUINightMode(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{
+		ID: "devui2", MAC: "AABBCCDDEE51", Gen: 2,
+		InitialConfig: plugUIInitialConfig("power", "momentary"),
+	}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE51", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{
+			NightMode: &shellyv1alpha1.NightMode{
+				Enable:        boolPtr(true),
+				Brightness:    ptrInt32(50),
+				ActiveBetween: []string{"23:00", "06:00"},
+			},
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee51")
+
+	snap := fake.ConfigSnapshot()["pluguk_ui"]
+	leds := snap["leds"].(map[string]any)
+	nm := leds["night_mode"].(map[string]any)
+	if nm["enable"] != true {
+		t.Errorf("night_mode.enable = %v, want true", nm["enable"])
+	}
+	if nm["brightness"] != float64(50) {
+		t.Errorf("night_mode.brightness = %v, want 50", nm["brightness"])
+	}
+	ab, ok := nm["active_between"].([]any)
+	if !ok || len(ab) != 2 || ab[0] != "23:00" || ab[1] != "06:00" {
+		t.Errorf("active_between = %v, want [23:00 06:00]", nm["active_between"])
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after night mode enforce = %+v, want True", cond)
+	}
+}
+
+func TestEnforceUIAlreadyInSync(t *testing.T) {
+	ns := newNamespace(t)
+	// Device already matches the desired LED mode -- no writes expected.
+	fake := &shellytest.Device{
+		ID: "devui3", MAC: "AABBCCDDEE52", Gen: 2,
+		InitialConfig: plugUIInitialConfig("off", "momentary"),
+	}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE52", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{LEDMode: strPtr("off")},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee52")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("in-sync device should not drift, condition = %+v", cond)
+	}
+	for _, call := range fake.RecordedCalls() {
+		if strings.Contains(strings.ToUpper(call.Method), "PLUGUK_UI") {
+			t.Errorf("in-sync device must not receive UI writes, saw %s", call.Method)
+		}
+	}
+}
+
+func TestEnforceUIRelayDeviceNoOp(t *testing.T) {
+	ns := newNamespace(t)
+	// Relay device: no *_ui key in config. UI section must be a no-op.
+	fake := &shellytest.Device{
+		ID: "devui4", MAC: "AABBCCDDEE53", Gen: 2,
+		InitialConfig: map[string]map[string]any{
+			"sys":      {"device": map[string]any{"eco_mode": false}},
+			"switch:0": {},
+			"switch:1": {},
+			// no *_ui component
+		},
+	}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE53", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		UI: &shellyv1alpha1.UISection{LEDMode: strPtr("power")},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee53")
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("relay with UI profile must be InSync (no-op), condition = %+v", cond)
+	}
+	for _, call := range fake.RecordedCalls() {
+		if strings.HasSuffix(strings.ToLower(call.Method), "_ui.setconfig") {
+			t.Errorf("relay device must not receive *_ui writes, saw %s", call.Method)
+		}
+	}
+}
+
 func TestEnforceSysTimezoneAndEcoModeTogether(t *testing.T) {
 	ns := newNamespace(t)
 	fake := &shellytest.Device{ID: "devtz2", MAC: "AABBCCDDF003", Gen: 2, InitialConfig: map[string]map[string]any{

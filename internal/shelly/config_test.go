@@ -57,11 +57,34 @@ func TestSetConfig(t *testing.T) {
 	}
 }
 
-func TestSetConfigUnknownComponent(t *testing.T) {
-	srv := shellytest.New(&shellytest.Device{ID: "dev1", Gen: 2})
+func TestSetConfigUnknownComponentFallback(t *testing.T) {
+	// Components not in componentMethods fall back to an uppercase RPC
+	// namespace. The fake accepts any *.SetConfig, verifying the client
+	// does not reject unknown components (e.g. dynamically discovered
+	// *_ui components like "pluguk_ui").
+	d := &shellytest.Device{ID: "dev1", Gen: 2, InitialConfig: map[string]map[string]any{
+		"pluguk_ui": {"leds": map[string]any{"mode": "power"}},
+	}}
+	srv := shellytest.New(d)
 	defer srv.Close()
-	if _, err := shelly.NewClient(hostOf(srv.URL)).SetConfig(context.Background(), "nope", map[string]any{}); err == nil {
-		t.Error("expected error for unknown component")
+	_, err := shelly.NewClient(hostOf(srv.URL)).SetConfig(context.Background(), "pluguk_ui",
+		map[string]any{"leds": map[string]any{"mode": "off"}})
+	if err != nil {
+		t.Fatalf("SetConfig for *_ui component must not error: %v", err)
+	}
+	// Verify the RPC method used the uppercase fallback.
+	calls := d.RecordedCalls()
+	if len(calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+	if calls[0].Method != "PLUGUK_UI.SetConfig" {
+		t.Errorf("method = %q, want PLUGUK_UI.SetConfig", calls[0].Method)
+	}
+	// Verify the config was actually updated.
+	snap := d.ConfigSnapshot()
+	leds, _ := snap["pluguk_ui"]["leds"].(map[string]any)
+	if leds["mode"] != "off" {
+		t.Errorf("leds.mode = %v, want off", leds["mode"])
 	}
 }
 

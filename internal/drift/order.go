@@ -6,8 +6,9 @@ import (
 )
 
 // ApplyOrder returns drifted sections sorted safest-first for enforcement:
-// sys, then switch components, then mqtt, then cloud and ble, then firmware;
-// auth second-to-last (it changes how the controller must talk to the device)
+// sys, then switch components and *_ui (plug LED/button -- harmless to
+// connectivity), then mqtt, then cloud and ble, then firmware; auth
+// second-to-last (it changes how the controller must talk to the device)
 // and wifi always dead last (it can move the device to another network,
 // dropping connectivity at its current address -- nothing can be applied
 // after it). Unknown sections sort after ble but before auth. The input
@@ -18,6 +19,9 @@ func ApplyOrder(sections []string) []string {
 		case s == "sys":
 			return 0
 		case strings.HasPrefix(s, "switch:"):
+			return 1
+		case strings.HasSuffix(s, "_ui"):
+			// Plug UI (LED/button) -- harmless to connectivity.
 			return 1
 		case s == "mqtt":
 			return 2

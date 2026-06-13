@@ -372,6 +372,59 @@ func TestScheduleSeeding(t *testing.T) {
 	}
 }
 
+func TestSetConfigPlugUIComponent(t *testing.T) {
+	// Verify that the generic *.SetConfig handler correctly stores a
+	// plug's *_ui component config and that subsequent reads reflect it.
+	d := &Device{ID: "dev-plug", Gen: 2, InitialConfig: map[string]map[string]any{
+		"pluguk_ui": {
+			"leds": map[string]any{
+				"mode": "power",
+				"night_mode": map[string]any{
+					"enable":         false,
+					"brightness":     float64(100),
+					"active_between": []any{"22:00", "07:00"},
+				},
+			},
+			"controls": map[string]any{
+				"switch:0": map[string]any{"in_mode": "momentary"},
+			},
+		},
+	}}
+	srv := New(d)
+	defer srv.Close()
+
+	// Apply a partial update via PLUGUK_UI.SetConfig (uppercase namespace).
+	body := `{"id":1,"method":"PLUGUK_UI.SetConfig","params":{"config":{"leds":{"mode":"off"}}}}`
+	resp, err := http.Post(srv.URL+"/rpc", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %s", resp.Status)
+	}
+
+	snap := d.ConfigSnapshot()
+	ui := snap["pluguk_ui"]
+	leds, ok := ui["leds"].(map[string]any)
+	if !ok {
+		t.Fatalf("leds not a map: %#v", ui["leds"])
+	}
+	if leds["mode"] != "off" {
+		t.Errorf("leds.mode after update = %v, want off", leds["mode"])
+	}
+	// Unchanged sibling keys must survive the merge.
+	nm, _ := leds["night_mode"].(map[string]any)
+	if nm["enable"] != false {
+		t.Errorf("night_mode.enable should be unchanged: %v", nm["enable"])
+	}
+	controls := ui["controls"].(map[string]any)
+	sw0 := controls["switch:0"].(map[string]any)
+	if sw0["in_mode"] != "momentary" {
+		t.Errorf("controls.switch:0.in_mode should be unchanged: %v", sw0["in_mode"])
+	}
+}
+
 func TestSysGetStatusAvailableUpdates(t *testing.T) {
 	d := &Device{ID: "dev1", MAC: "AABBCCDDEEFF", Gen: 2,
 		AvailableUpdates: map[string]any{"stable": map[string]any{"version": "1.7.5"}}}

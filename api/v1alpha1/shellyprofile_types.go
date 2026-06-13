@@ -84,6 +84,54 @@ type ProfileConfig struct {
 	Wifi *WifiSection `json:"wifi,omitempty"`
 	// +optional
 	Firmware *FirmwareSection `json:"firmware,omitempty"`
+	// UI manages the plug LED ring and physical button on plug models that
+	// expose a *_ui component (e.g. PlusPlugUK). Relay-only devices that
+	// have no *_ui component in their config are unaffected; this section
+	// is a no-op for them.
+	// +optional
+	UI *UISection `json:"ui,omitempty"`
+}
+
+// UISection manages the plug LED ring and physical button configuration.
+// It applies only to devices whose Shelly.GetConfig response includes a
+// component matching the pattern ^[a-z0-9]+_ui$ (e.g. pluguk_ui).
+// Relay devices with no such component are unaffected.
+type UISection struct {
+	// LEDMode controls what the LED ring displays.
+	// power = brightness tracks power consumption,
+	// switch = on/off state,
+	// off = always off.
+	// +kubebuilder:validation:Enum=power;switch;off
+	// +optional
+	LEDMode *string `json:"ledMode,omitempty"`
+	// NightMode configures the LED night-mode dimming schedule.
+	// +optional
+	NightMode *NightMode `json:"nightMode,omitempty"`
+	// ButtonInMode controls the physical button behaviour.
+	// momentary = press-and-release toggles,
+	// follow = output tracks button state,
+	// flip = each press toggles,
+	// detached = button does not affect the relay.
+	// +kubebuilder:validation:Enum=momentary;follow;flip;detached
+	// +optional
+	ButtonInMode *string `json:"buttonInMode,omitempty"`
+}
+
+// NightMode configures LED night-mode dimming for plug models.
+type NightMode struct {
+	// Enable turns night-mode dimming on or off.
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+	// Brightness is the LED brightness percentage during night mode (0-100).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	Brightness *int32 `json:"brightness,omitempty"`
+	// ActiveBetween is a [start, end] pair of "HH:MM" 24-hour local times
+	// that bound the night-mode window.
+	// +kubebuilder:validation:MaxItems=2
+	// +optional
+	ActiveBetween []string `json:"activeBetween,omitempty"`
 }
 
 // SystemSection maps to the device's sys configuration.

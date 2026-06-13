@@ -105,6 +105,16 @@ func wifiPayload(rendered map[string]any, pw fleet.WifiPasswords) map[string]any
 		if m, ok := v.(map[string]any); ok {
 			cp := make(map[string]any, len(m)+1)
 			maps.Copy(cp, m)
+			// Deep-copy one more level so nested objects (e.g.
+			// ap.range_extender) are not aliased back into the caller's
+			// rendered map -- the input must not be mutated.
+			for nk, nv := range m {
+				if nm, ok := nv.(map[string]any); ok {
+					ncp := make(map[string]any, len(nm))
+					maps.Copy(ncp, nm)
+					cp[nk] = ncp
+				}
+			}
 			out[k] = cp
 			continue
 		}

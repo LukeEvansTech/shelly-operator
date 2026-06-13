@@ -33,3 +33,23 @@ func TestWifiPayloadNoPasswords(t *testing.T) {
 		t.Fatalf("got %#v, want unchanged payload", got)
 	}
 }
+
+// Nested objects (e.g. ap.range_extender) must be deep-copied so the returned
+// payload does not alias the caller's rendered map.
+func TestWifiPayloadDeepCopiesNestedMaps(t *testing.T) {
+	rendered := map[string]any{
+		"ap": map[string]any{"enable": false, "range_extender": map[string]any{"enable": false}},
+	}
+	got := wifiPayload(rendered, fleet.WifiPasswords{})
+
+	gotRE, ok := got["ap"].(map[string]any)["range_extender"].(map[string]any)
+	if !ok {
+		t.Fatalf("ap.range_extender missing: %#v", got["ap"])
+	}
+	// Mutating the returned nested map must not touch the input.
+	gotRE["enable"] = true
+	srcRE := rendered["ap"].(map[string]any)["range_extender"].(map[string]any)
+	if srcRE["enable"] != false {
+		t.Fatal("wifiPayload aliased a nested map back into its input")
+	}
+}

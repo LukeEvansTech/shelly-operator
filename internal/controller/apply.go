@@ -36,7 +36,7 @@ type applyResult struct {
 // inject the resolved network passwords via wifiPayload before the write.
 // The firmware pseudo-section is special-cased to applyFirmware (schedule-job writes).
 func (r *ShellyDeviceReconciler) applyFindings(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
-	desired map[string]map[string]any, findings []drift.Finding, authEnable, fwEnable *bool, password string, wifiPw fleet.WifiPasswords) (applyResult, error) {
+	desired map[string]map[string]any, findings []drift.Finding, authEnable, fwEnable *bool, password string, wifiPw fleet.WifiPasswords, profile *shellyv1alpha1.ShellyProfile) (applyResult, error) {
 
 	var res applyResult
 	for _, section := range drift.ApplyOrder(drift.Sections(findings)) {
@@ -65,6 +65,15 @@ func (r *ShellyDeviceReconciler) applyFindings(ctx context.Context, c *shelly.Cl
 			}
 			if err := applyFirmware(ctx, c, *fwEnable); err != nil {
 				return res, fmt.Errorf("firmware: %w", err)
+			}
+		case section == sectionSchedule:
+			if profile == nil || profile.Spec.Config.Schedules == nil {
+				// Cannot happen: findings only exist when the profile
+				// manages the section. Defensive guard.
+				return res, fmt.Errorf("schedule: section drifted but profile does not manage it")
+			}
+			if err := applySchedule(ctx, c, profile); err != nil {
+				return res, fmt.Errorf("schedule: %w", err)
 			}
 		case section == sectionWifi:
 			restart, err := c.SetConfig(ctx, section, wifiPayload(desired[section], wifiPw))

@@ -5,11 +5,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 	"github.com/LukeEvansTech/shelly-operator/internal/drift"
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
 )
+
+// specIsUpdateJob reports whether a declared schedule job invokes
+// Shelly.Update. Such jobs belong to the firmware section, not here, so the
+// schedule section ignores them entirely -- the mirror of the device-side
+// isUpdateJob filter. Without this guard a declared Shelly.Update call would
+// be created on the device (where isUpdateJob then excludes it from the
+// schedule domain), producing one spurious write and a permanent
+// non-converging state. A CEL rule on ScheduleCallSpec also rejects it at
+// admission; this is defense-in-depth for programmatic API callers.
+func specIsUpdateJob(spec shellyv1alpha1.ScheduleJobSpec) bool {
+	for _, c := range spec.Calls {
+		if strings.EqualFold(c.Method, shellyUpdateMethod) {
+			return true
+		}
+	}
+	return false
+}
 
 // sectionSchedule is the pseudo-section name for declarative schedule
 // management. Like firmware it is backed by Schedule RPCs and not part of
@@ -151,6 +169,9 @@ func scheduleActions(section *shellyv1alpha1.ScheduleSection, deviceJobs []shell
 
 	// First pass: match declared specs to device jobs by content.
 	for si, spec := range section.Jobs {
+		if specIsUpdateJob(spec) {
+			continue // Shelly.Update jobs belong to the firmware section.
+		}
 		for di, dj := range ownedJobs {
 			if deviceMatched[di] {
 				continue
@@ -187,6 +208,9 @@ func scheduleActions(section *shellyv1alpha1.ScheduleSection, deviceJobs []shell
 	for si, spec := range section.Jobs {
 		if matched[si] {
 			continue
+		}
+		if specIsUpdateJob(spec) {
+			continue // never create a Shelly.Update job here; firmware owns it.
 		}
 		// Build the job struct; we don't have calls yet (error handled in
 		// applySchedule); store spec for later.
@@ -264,8 +288,10 @@ func applySchedule(ctx context.Context, c *shelly.Client, profile *shellyv1alpha
 	}
 	actions := scheduleActions(sec, jobs)
 
-	// Apply creates first, then updates, then deletes so we don't leave the
-	// device in a momentarily empty state.
+	// Apply in actions order: updates, then creates, then deletes (the order
+	// scheduleActions appends them). Creates always precede deletes, so a
+	// changed job's replacement exists before the old one is removed -- the
+	// device never has a momentarily-missing job.
 	for _, a := range actions {
 		switch a.kind {
 		case "create":

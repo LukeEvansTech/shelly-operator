@@ -378,8 +378,10 @@ type ScheduleJobSpec struct {
 }
 
 // ScheduleCallSpec is one RPC call a schedule job performs.
+// +kubebuilder:validation:XValidation:rule="self.method != 'Shelly.Update'",message="Shelly.Update is managed by the firmware section (config.firmware.autoUpdate), not the schedule section"
 type ScheduleCallSpec struct {
-	// Method is the RPC method name, e.g. "Switch.Set".
+	// Method is the RPC method name, e.g. "Switch.Set". Shelly.Update is
+	// rejected here -- firmware auto-update is managed by config.firmware.
 	Method string `json:"method"`
 	// Params is arbitrary JSON forwarded verbatim as the RPC method's params.
 	// Use this to pass device-specific arguments, e.g. {"id":0,"on":true}.

@@ -212,6 +212,29 @@ func TestScheduleActionsUpdateEnable(t *testing.T) {
 	}
 }
 
+func TestScheduleActionsIgnoresDeclaredUpdateJob(t *testing.T) {
+	// A declared schedule job that calls Shelly.Update belongs to the firmware
+	// section, so the schedule section must ignore it -- no spurious create
+	// action (the mirror of the device-side firmware-job filter). Otherwise it
+	// would write a Shelly.Update job that isUpdateJob then excludes, looping
+	// as non-converging.
+	updateSpec := shellyv1alpha1.ScheduleJobSpec{
+		Timespec: "0 0 3 * * *",
+		Calls:    []shellyv1alpha1.ScheduleCallSpec{{Method: "Shelly.Update"}},
+	}
+	if got := scheduleActions(newSection(updateSpec), nil); len(got) != 0 {
+		t.Errorf("declared Shelly.Update job must be ignored, got %+v", got)
+	}
+	// Case-insensitive: a lowercase variant must also be ignored.
+	lowerSpec := shellyv1alpha1.ScheduleJobSpec{
+		Timespec: "0 0 3 * * *",
+		Calls:    []shellyv1alpha1.ScheduleCallSpec{{Method: "shelly.update"}},
+	}
+	if got := scheduleActions(newSection(lowerSpec), nil); len(got) != 0 {
+		t.Errorf("declared shelly.update (any case) must be ignored, got %+v", got)
+	}
+}
+
 func TestScheduleActionsIgnoresFirmwareJobs(t *testing.T) {
 	// A firmware (Shelly.Update) job on the device must survive even when the
 	// profile declares an empty schedule section (full ownership of non-update

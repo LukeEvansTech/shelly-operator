@@ -3,12 +3,13 @@ package shelly
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strings"
 )
 
 // componentMethods maps lowercase component names to their RPC namespace.
-// Keyed components (switch) have dedicated helpers because their params
-// carry an instance id.
+// Known components are listed here so their canonical casing is preserved
+// (e.g. "MQTT", "BLE"). Keyed components (switch) have dedicated helpers
+// because their params carry an instance id.
 var componentMethods = map[string]string{
 	"sys":   "Sys",
 	"wifi":  "Wifi",
@@ -35,10 +36,17 @@ func (c *Client) GetConfig(ctx context.Context) (map[string]json.RawMessage, err
 // SetConfig applies a partial config to a non-keyed component, e.g.
 // SetConfig(ctx, "sys", map[string]any{"device": map[string]any{"name": "PDU-01"}}).
 // Returns whether the device wants a restart for the change to take effect.
+// For components not in componentMethods (e.g. dynamically discovered *_ui
+// components), the RPC namespace is derived by uppercasing the component
+// name (e.g. "pluguk_ui" -> "PLUGUK_UI"). Shelly method names are
+// case-insensitive, so this works for all Gen2+ devices.
 func (c *Client) SetConfig(ctx context.Context, component string, config any) (restartRequired bool, err error) {
 	ns, ok := componentMethods[component]
 	if !ok {
-		return false, fmt.Errorf("shelly: unknown component %q", component)
+		// Fallback: uppercase the component name as the RPC namespace.
+		// Shelly devices accept case-insensitive method names, so
+		// PLUGUK_UI.SetConfig works the same as Pluguk_Ui.SetConfig.
+		ns = strings.ToUpper(component)
 	}
 	var res setConfigResult
 	err = c.Call(ctx, ns+".SetConfig", map[string]any{"config": config}, &res)

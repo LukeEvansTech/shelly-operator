@@ -75,6 +75,8 @@ type ProfileConfig struct {
 	// +optional
 	Cloud *CloudSection `json:"cloud,omitempty"`
 	// +optional
+	BLE *BLESection `json:"ble,omitempty"`
+	// +optional
 	Auth *AuthSection `json:"auth,omitempty"`
 	// +optional
 	Switch *SwitchSection `json:"switch,omitempty"`
@@ -82,6 +84,54 @@ type ProfileConfig struct {
 	Wifi *WifiSection `json:"wifi,omitempty"`
 	// +optional
 	Firmware *FirmwareSection `json:"firmware,omitempty"`
+	// UI manages the plug LED ring and physical button on plug models that
+	// expose a *_ui component (e.g. PlusPlugUK). Relay-only devices that
+	// have no *_ui component in their config are unaffected; this section
+	// is a no-op for them.
+	// +optional
+	UI *UISection `json:"ui,omitempty"`
+}
+
+// UISection manages the plug LED ring and physical button configuration.
+// It applies only to devices whose Shelly.GetConfig response includes a
+// component matching the pattern ^[a-z0-9]+_ui$ (e.g. pluguk_ui).
+// Relay devices with no such component are unaffected.
+type UISection struct {
+	// LEDMode controls what the LED ring displays.
+	// power = brightness tracks power consumption,
+	// switch = on/off state,
+	// off = always off.
+	// +kubebuilder:validation:Enum=power;switch;off
+	// +optional
+	LEDMode *string `json:"ledMode,omitempty"`
+	// NightMode configures the LED night-mode dimming schedule.
+	// +optional
+	NightMode *NightMode `json:"nightMode,omitempty"`
+	// ButtonInMode controls the physical button behaviour.
+	// momentary = press-and-release toggles,
+	// follow = output tracks button state,
+	// flip = each press toggles,
+	// detached = button does not affect the relay.
+	// +kubebuilder:validation:Enum=momentary;follow;flip;detached
+	// +optional
+	ButtonInMode *string `json:"buttonInMode,omitempty"`
+}
+
+// NightMode configures LED night-mode dimming for plug models.
+type NightMode struct {
+	// Enable turns night-mode dimming on or off.
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+	// Brightness is the LED brightness percentage during night mode (0-100).
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
+	// +optional
+	Brightness *int32 `json:"brightness,omitempty"`
+	// ActiveBetween is a [start, end] pair of "HH:MM" 24-hour local times
+	// that bound the night-mode window.
+	// +kubebuilder:validation:MaxItems=2
+	// +optional
+	ActiveBetween []string `json:"activeBetween,omitempty"`
 }
 
 // SystemSection maps to the device's sys configuration.
@@ -89,6 +139,29 @@ type SystemSection struct {
 	// EcoMode toggles the device's power-saving mode (sys.device.eco_mode).
 	// +optional
 	EcoMode *bool `json:"ecoMode,omitempty"`
+	// Discoverable controls whether the device is visible via mDNS/BLE
+	// advertisement (sys.device.discoverable).
+	// +optional
+	Discoverable *bool `json:"discoverable,omitempty"`
+	// Timezone sets the device's local timezone (sys.location.tz), e.g.
+	// "Europe/London". See the Shelly API docs for the accepted tz strings.
+	// +optional
+	Timezone *string `json:"timezone,omitempty"`
+	// Latitude sets the device's geographic latitude (sys.location.lat).
+	// Must be a decimal number, e.g. "51.5074". Used for sunrise/sunset
+	// schedules on the device.
+	// +kubebuilder:validation:Pattern=`^-?\d+(\.\d+)?$`
+	// +optional
+	Latitude *string `json:"latitude,omitempty"`
+	// Longitude sets the device's geographic longitude (sys.location.lon).
+	// Must be a decimal number, e.g. "-0.1278".
+	// +kubebuilder:validation:Pattern=`^-?\d+(\.\d+)?$`
+	// +optional
+	Longitude *string `json:"longitude,omitempty"`
+	// SNTPServer sets the NTP server the device uses for time sync
+	// (sys.sntp.server), e.g. "time.cloudflare.com".
+	// +optional
+	SNTPServer *string `json:"sntpServer,omitempty"`
 }
 
 // NameSection enables device-name management.
@@ -114,6 +187,12 @@ type MQTTSection struct {
 
 // CloudSection maps to the device's cloud configuration.
 type CloudSection struct {
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+}
+
+// BLESection maps to the device's ble (Bluetooth Low Energy) configuration.
+type BLESection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`
 }
@@ -166,14 +245,27 @@ type SwitchSection struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	PowerLimit *int32 `json:"powerLimit,omitempty"`
+	// VoltageLimit in volts; the switch turns off above it.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	VoltageLimit *int32 `json:"voltageLimit,omitempty"`
+	// CurrentLimit in amps; the switch turns off above it.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	CurrentLimit *int32 `json:"currentLimit,omitempty"`
+	// AutorecoverVoltageErrors controls whether the switch automatically
+	// re-enables itself after a voltage-limit trip.
+	// +optional
+	AutorecoverVoltageErrors *bool `json:"autorecoverVoltageErrors,omitempty"`
 }
 
-// WifiSection maps to the device's wifi configuration. Only the sta
-// (primary) and sta1 (fallback) client networks are managed; AP and
-// roaming settings are untouched. Devices never report stored WiFi
-// passwords, so password drift is undetectable -- passwords are injected
-// at apply time whenever a network's section is written for another
-// reason (ssid or enable drift).
+// WifiSection maps to the device's wifi configuration. The sta (primary)
+// and sta1 (fallback) client networks are managed, as are the onboard AP
+// and roaming settings. Devices never report stored WiFi passwords, so
+// password drift is undetectable -- passwords are injected at apply time
+// whenever a network's section is written for another reason (ssid or
+// enable drift). AP and roam fields carry no passwords and are diffed
+// directly.
 // +kubebuilder:validation:XValidation:rule="!has(self.sta) || !has(self.sta1) || !has(self.sta.ssid) || !has(self.sta1.ssid) || self.sta.ssid != self.sta1.ssid",message="sta and sta1 must not declare the same ssid"
 type WifiSection struct {
 	// Sta is the primary client network.
@@ -184,6 +276,36 @@ type WifiSection struct {
 	// bad sta rollout cannot strand devices.
 	// +optional
 	Sta1 *WifiNetwork `json:"sta1,omitempty"`
+	// AP configures the device's onboard access point (wifi.ap).
+	// +optional
+	AP *WifiAP `json:"ap,omitempty"`
+	// Roam configures the client roaming parameters (wifi.roam).
+	// +optional
+	Roam *WifiRoam `json:"roam,omitempty"`
+}
+
+// WifiAP configures the device's onboard access point (wifi.ap.*).
+type WifiAP struct {
+	// Enable turns the onboard AP on or off (wifi.ap.enable).
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+	// RangeExtender enables the AP range-extender mode
+	// (wifi.ap.range_extender.enable).
+	// +optional
+	RangeExtender *bool `json:"rangeExtender,omitempty"`
+}
+
+// WifiRoam configures the client roaming parameters (wifi.roam.*).
+type WifiRoam struct {
+	// RSSIThreshold is the RSSI level (dBm) below which the device will
+	// attempt to roam to a stronger AP (wifi.roam.rssi_thr).
+	// +optional
+	RSSIThreshold *int32 `json:"rssiThreshold,omitempty"`
+	// Interval is the roaming scan interval in seconds
+	// (wifi.roam.interval).
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	Interval *int32 `json:"interval,omitempty"`
 }
 
 // WifiNetwork declares one WiFi client network (wifi.sta / wifi.sta1).

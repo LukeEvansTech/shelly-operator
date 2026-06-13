@@ -42,6 +42,8 @@ import (
 	"github.com/LukeEvansTech/shelly-operator/internal/dashboard"
 	"github.com/LukeEvansTech/shelly-operator/internal/discovery"
 	"github.com/LukeEvansTech/shelly-operator/internal/exporterfeed"
+	"github.com/LukeEvansTech/shelly-operator/internal/metrics"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -206,6 +208,13 @@ func main() {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+
+	// Register fleet-health Prometheus metrics. The collector lists ShellyDevices
+	// on every scrape using the manager's cached client (started alongside the
+	// manager). This avoids stale series on device deletion and per-reconcile churn.
+	ctrlmetrics.Registry.MustRegister(
+		metrics.NewDeviceCollector(mgr.GetClient(), deviceNamespace),
+	)
 
 	// +kubebuilder:scaffold:builder
 

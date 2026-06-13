@@ -77,6 +77,8 @@ type ProfileConfig struct {
 	// +optional
 	BLE *BLESection `json:"ble,omitempty"`
 	// +optional
+	WS *WSSection `json:"ws,omitempty"`
+	// +optional
 	Auth *AuthSection `json:"auth,omitempty"`
 	// +optional
 	Switch *SwitchSection `json:"switch,omitempty"`
@@ -162,6 +164,12 @@ type SystemSection struct {
 	// (sys.sntp.server), e.g. "time.cloudflare.com".
 	// +optional
 	SNTPServer *string `json:"sntpServer,omitempty"`
+	// DebugLevel sets the device's debug verbosity (sys.debug.level).
+	// Shelly devices accept levels 0-4; 0 disables debug output. Only
+	// non-negative values are accepted.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	DebugLevel *int32 `json:"debugLevel,omitempty"`
 }
 
 // NameSection enables device-name management.
@@ -193,6 +201,12 @@ type CloudSection struct {
 
 // BLESection maps to the device's ble (Bluetooth Low Energy) configuration.
 type BLESection struct {
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+}
+
+// WSSection maps to the device's outbound WebSocket (ws) configuration.
+type WSSection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`
 }

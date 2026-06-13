@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -77,6 +78,8 @@ type ProfileConfig struct {
 	// +optional
 	BLE *BLESection `json:"ble,omitempty"`
 	// +optional
+	WS *WSSection `json:"ws,omitempty"`
+	// +optional
 	Auth *AuthSection `json:"auth,omitempty"`
 	// +optional
 	Switch *SwitchSection `json:"switch,omitempty"`
@@ -84,6 +87,13 @@ type ProfileConfig struct {
 	Wifi *WifiSection `json:"wifi,omitempty"`
 	// +optional
 	Firmware *FirmwareSection `json:"firmware,omitempty"`
+	// Schedules manages timed schedule jobs on the device (Schedule RPCs). When
+	// this section is present, the operator takes FULL OWNERSHIP of all
+	// non-firmware schedule jobs on the device: any job not declared in this
+	// section will be deleted. A profile without this section leaves all
+	// schedules untouched.
+	// +optional
+	Schedules *ScheduleSection `json:"schedules,omitempty"`
 	// UI manages the plug LED ring and physical button on plug models that
 	// expose a *_ui component (e.g. PlusPlugUK). Relay-only devices that
 	// have no *_ui component in their config are unaffected; this section
@@ -162,6 +172,12 @@ type SystemSection struct {
 	// (sys.sntp.server), e.g. "time.cloudflare.com".
 	// +optional
 	SNTPServer *string `json:"sntpServer,omitempty"`
+	// DebugLevel sets the device's debug verbosity (sys.debug.level).
+	// Shelly devices accept levels 0-4; 0 disables debug output. Only
+	// non-negative values are accepted.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	DebugLevel *int32 `json:"debugLevel,omitempty"`
 }
 
 // NameSection enables device-name management.
@@ -193,6 +209,12 @@ type CloudSection struct {
 
 // BLESection maps to the device's ble (Bluetooth Low Energy) configuration.
 type BLESection struct {
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+}
+
+// WSSection maps to the device's outbound WebSocket (ws) configuration.
+type WSSection struct {
 	// +optional
 	Enable *bool `json:"enable,omitempty"`
 }
@@ -321,6 +343,52 @@ type WifiNetwork struct {
 	// password is already stored on the device.
 	// +optional
 	PassSecretRef *SecretKeyRef `json:"passSecretRef,omitempty"`
+}
+
+// ScheduleSection declares timed schedule jobs the operator must maintain on
+// the device. When this section is present the operator takes FULL OWNERSHIP
+// of the device's non-firmware schedule jobs: any job not declared here is
+// treated as drift and will be deleted. The firmware auto-update job (any job
+// invoking Shelly.Update) is always excluded from this ownership domain and
+// is never touched by this section.
+//
+// WARNING: declaring a ScheduleSection on a profile opts that device in to
+// schedule ownership. Pre-existing custom schedules created by the Shelly app
+// or any other tool that are not listed here WILL be deleted at the next
+// enforce cycle. This behaviour is intentional; the operator is the sole
+// source of truth for custom schedules.
+type ScheduleSection struct {
+	// Jobs is the list of schedule jobs the operator must maintain.
+	// +optional
+	Jobs []ScheduleJobSpec `json:"jobs,omitempty"`
+}
+
+// ScheduleJobSpec declares one schedule job.
+type ScheduleJobSpec struct {
+	// Enable controls whether the job is active. Defaults to true when omitted.
+	// +optional
+	Enable *bool `json:"enable,omitempty"`
+	// Timespec is a Shelly cron-like spec, e.g. "0 0 22 * * *" (seconds
+	// minutes hours dom month dow). See the Shelly Schedule.Create documentation
+	// for the accepted format.
+	Timespec string `json:"timespec"`
+	// Calls is the list of RPC invocations the job performs when it fires.
+	// +kubebuilder:validation:MinItems=1
+	Calls []ScheduleCallSpec `json:"calls"`
+}
+
+// ScheduleCallSpec is one RPC call a schedule job performs.
+// +kubebuilder:validation:XValidation:rule="self.method != 'Shelly.Update'",message="Shelly.Update is managed by the firmware section (config.firmware.autoUpdate), not the schedule section"
+type ScheduleCallSpec struct {
+	// Method is the RPC method name, e.g. "Switch.Set". Shelly.Update is
+	// rejected here -- firmware auto-update is managed by config.firmware.
+	Method string `json:"method"`
+	// Params is arbitrary JSON forwarded verbatim as the RPC method's params.
+	// Use this to pass device-specific arguments, e.g. {"id":0,"on":true}.
+	// +optional
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Params *apiextensionsv1.JSON `json:"params,omitempty"`
 }
 
 // FirmwareSection manages the device's firmware auto-update schedule

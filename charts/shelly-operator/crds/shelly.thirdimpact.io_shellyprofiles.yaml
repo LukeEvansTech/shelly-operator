@@ -140,6 +140,63 @@ spec:
                     required:
                     - managed
                     type: object
+                  schedules:
+                    description: |-
+                      Schedules manages timed schedule jobs on the device (Schedule RPCs). When
+                      this section is present, the operator takes FULL OWNERSHIP of all
+                      non-firmware schedule jobs on the device: any job not declared in this
+                      section will be deleted. A profile without this section leaves all
+                      schedules untouched.
+                    properties:
+                      jobs:
+                        description: Jobs is the list of schedule jobs the operator
+                          must maintain.
+                        items:
+                          description: ScheduleJobSpec declares one schedule job.
+                          properties:
+                            calls:
+                              description: Calls is the list of RPC invocations the
+                                job performs when it fires.
+                              items:
+                                description: ScheduleCallSpec is one RPC call a schedule
+                                  job performs.
+                                properties:
+                                  method:
+                                    description: |-
+                                      Method is the RPC method name, e.g. "Switch.Set". Shelly.Update is
+                                      rejected here -- firmware auto-update is managed by config.firmware.
+                                    type: string
+                                  params:
+                                    description: |-
+                                      Params is arbitrary JSON forwarded verbatim as the RPC method's params.
+                                      Use this to pass device-specific arguments, e.g. {"id":0,"on":true}.
+                                    x-kubernetes-preserve-unknown-fields: true
+                                required:
+                                - method
+                                type: object
+                                x-kubernetes-validations:
+                                - message: Shelly.Update is managed by the firmware
+                                    section (config.firmware.autoUpdate), not the
+                                    schedule section
+                                  rule: self.method != 'Shelly.Update'
+                              minItems: 1
+                              type: array
+                            enable:
+                              description: Enable controls whether the job is active.
+                                Defaults to true when omitted.
+                              type: boolean
+                            timespec:
+                              description: |-
+                                Timespec is a Shelly cron-like spec, e.g. "0 0 22 * * *" (seconds
+                                minutes hours dom month dow). See the Shelly Schedule.Create documentation
+                                for the accepted format.
+                              type: string
+                          required:
+                          - calls
+                          - timespec
+                          type: object
+                        type: array
+                    type: object
                   switch:
                     description: |-
                       SwitchSection applies to every switch component the device exposes
@@ -196,6 +253,14 @@ spec:
                   system:
                     description: SystemSection maps to the device's sys configuration.
                     properties:
+                      debugLevel:
+                        description: |-
+                          DebugLevel sets the device's debug verbosity (sys.debug.level).
+                          Shelly devices accept levels 0-4; 0 disables debug output. Only
+                          non-negative values are accepted.
+                        format: int32
+                        minimum: 0
+                        type: integer
                       discoverable:
                         description: |-
                           Discoverable controls whether the device is visible via mDNS/BLE
@@ -399,6 +464,13 @@ spec:
                     - message: sta and sta1 must not declare the same ssid
                       rule: '!has(self.sta) || !has(self.sta1) || !has(self.sta.ssid)
                         || !has(self.sta1.ssid) || self.sta.ssid != self.sta1.ssid'
+                  ws:
+                    description: WSSection maps to the device's outbound WebSocket
+                      (ws) configuration.
+                    properties:
+                      enable:
+                        type: boolean
+                    type: object
                 type: object
               mode:
                 default: observe

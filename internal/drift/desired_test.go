@@ -740,3 +740,94 @@ func keys(m map[string]map[string]any) []string {
 	}
 	return out
 }
+
+// ---- Feature: WS (outbound WebSocket) section --------------------------------
+
+func TestRenderWSEnable(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		WS: &shellyv1alpha1.WSSection{Enable: ptr(false)},
+	}
+	got := Render(cfg, "", nil)
+	want := map[string]any{"enable": false}
+	if !reflect.DeepEqual(got["ws"], want) {
+		t.Errorf("ws = %#v, want %#v", got["ws"], want)
+	}
+}
+
+func TestRenderWSNilUnmanaged(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{WS: &shellyv1alpha1.WSSection{}}
+	got := Render(cfg, "", nil)
+	if got["ws"] != nil {
+		t.Errorf("nil WS.Enable must render nothing, got %#v", got["ws"])
+	}
+}
+
+// ---- Feature: sys.debug.level ------------------------------------------------
+
+func TestRenderSysDebugLevel(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{DebugLevel: ptr(int32(0))},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	debug, ok := sys["debug"].(map[string]any)
+	if !ok {
+		t.Fatalf("sys.debug not a map: %#v", sys["debug"])
+	}
+	if debug["level"] != float64(0) {
+		t.Errorf("sys.debug.level = %v (%T), want 0.0 (float64)", debug["level"], debug["level"])
+	}
+	// debug must not clobber device, location, or sntp.
+	if _, has := sys["device"]; has {
+		t.Errorf("debug-only render must not include device sub-map, got %#v", sys)
+	}
+	if _, has := sys["location"]; has {
+		t.Errorf("debug-only render must not include location sub-map, got %#v", sys)
+	}
+	if _, has := sys["sntp"]; has {
+		t.Errorf("debug-only render must not include sntp sub-map, got %#v", sys)
+	}
+}
+
+func TestRenderSysDebugLevelDoesNotClobberOtherSubMaps(t *testing.T) {
+	// DebugLevel together with EcoMode, Timezone, and SNTPServer -- all sub-maps
+	// must be present and correct.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			EcoMode:    ptr(true),
+			Timezone:   ptr("UTC"),
+			SNTPServer: ptr("time.cloudflare.com"),
+			DebugLevel: ptr(int32(2)),
+		},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+
+	device, okD := sys["device"].(map[string]any)
+	location, okL := sys["location"].(map[string]any)
+	sntp, okS := sys["sntp"].(map[string]any)
+	debug, okG := sys["debug"].(map[string]any)
+
+	if !okD || device["eco_mode"] != true {
+		t.Errorf("sys.device missing or wrong: %#v", sys["device"])
+	}
+	if !okL || location["tz"] != "UTC" {
+		t.Errorf("sys.location missing or wrong: %#v", sys["location"])
+	}
+	if !okS || sntp["server"] != "time.cloudflare.com" {
+		t.Errorf("sys.sntp missing or wrong: %#v", sys["sntp"])
+	}
+	if !okG || debug["level"] != float64(2) {
+		t.Errorf("sys.debug missing or wrong level: %#v", sys["debug"])
+	}
+}
+
+func TestRenderSysDebugLevelNilUnmanaged(t *testing.T) {
+	// DebugLevel nil must not produce a debug sub-map.
+	cfg := shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: ptr(false)}}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	if _, has := sys["debug"]; has {
+		t.Errorf("nil DebugLevel must not include debug sub-map, got %#v", sys)
+	}
+}

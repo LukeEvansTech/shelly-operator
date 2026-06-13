@@ -62,7 +62,7 @@ func (s *Server) handleDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	profile, _ := drift.MatchProfile(&dev, profiles.Items)
 
-	name, nameErr := fleet.ResolveName(ctx, s.Reader, &dev, s.NameMapName)
+	name, nameErr := fleet.ResolveName(ctx, s.Reader, &dev, s.NameMapName, s.RegistryName)
 	if nameErr != nil {
 		view.Message = appendMsg(view.Message, fmt.Sprintf("name map unavailable: %v", nameErr))
 	}

@@ -213,6 +213,8 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 		d.handleScheduleList(w, req.ID)
 	case req.Method == "Schedule.Create":
 		d.handleScheduleCreate(w, req.ID, req.Params)
+	case req.Method == "Schedule.Update":
+		d.handleScheduleUpdate(w, req.ID, req.Params)
 	case req.Method == "Schedule.Delete":
 		d.handleScheduleDelete(w, req.ID, req.Params)
 	case strings.HasSuffix(req.Method, ".SetConfig"):
@@ -281,6 +283,38 @@ func (d *Device) handleScheduleCreate(w http.ResponseWriter, id int64, params js
 	d.schedules = append(d.schedules, job)
 	d.scheduleRev++
 	writeJSON(w, rpcResult(id, map[string]any{"id": job["id"], "rev": d.scheduleRev}))
+}
+
+func (d *Device) handleScheduleUpdate(w http.ResponseWriter, id int64, params json.RawMessage) {
+	var p struct {
+		ID       *int    `json:"id"`
+		Enable   *bool   `json:"enable"`
+		Timespec *string `json:"timespec"`
+		Calls    any     `json:"calls"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.ID == nil {
+		writeJSON(w, rpcError(id, -103, "invalid Schedule.Update params"))
+		return
+	}
+	idx := -1
+	for i, j := range d.schedules {
+		if idOf(j["id"]) == *p.ID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		writeJSON(w, rpcError(id, -103, fmt.Sprintf("schedule job %d not found", *p.ID)))
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(params, &raw); err != nil {
+		writeJSON(w, rpcError(id, -103, "invalid Schedule.Update params"))
+		return
+	}
+	d.schedules[idx] = merge(d.schedules[idx], raw)
+	d.scheduleRev++
+	writeJSON(w, rpcResult(id, map[string]any{"rev": d.scheduleRev}))
 }
 
 func (d *Device) handleScheduleDelete(w http.ResponseWriter, id int64, params json.RawMessage) {

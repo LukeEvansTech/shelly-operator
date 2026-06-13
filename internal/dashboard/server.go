@@ -30,12 +30,13 @@ var fleetTmpl = template.Must(template.ParseFS(tmplFS, "templates/layout.html", 
 // Server is the dashboard. It implements manager.Runnable and runs on
 // every replica (read-only; no leader election needed).
 type Server struct {
-	Client      client.Client // cached
-	Reader      client.Reader // uncached (name map, secrets)
-	HTTP        *http.Client  // device RPC for the detail view; nil = 10s default
-	Namespace   string
-	NameMapName string
-	Addr        string // listen address, e.g. ":8090"
+	Client       client.Client // cached
+	Reader       client.Reader // uncached (name map, secrets)
+	HTTP         *http.Client  // device RPC for the detail view; nil = 10s default
+	Namespace    string
+	NameMapName  string
+	RegistryName string
+	Addr         string // listen address, e.g. ":8090"
 }
 
 // NeedLeaderElection: the dashboard serves reads on every replica.
@@ -66,8 +67,8 @@ func (s *Server) handler() http.Handler {
 }
 
 type fleetRow struct {
-	Object, Name, Model, Address, Profile, Sync, SyncClass, Drift, Update string
-	Online                                                                bool
+	Object, Name, Room, Type, Model, Address, Profile, Sync, SyncClass, Drift, Update string
+	Online                                                                            bool
 }
 
 func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +87,8 @@ func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, fleetRow{
 			Object: d.Name, Name: name, Model: d.Status.Model, Address: d.Status.Address,
+			Room:   d.Labels[shellyv1alpha1.LabelRoom],
+			Type:   d.Labels[shellyv1alpha1.LabelAppliance],
 			Online: d.Status.Online, Profile: d.Status.MatchedProfile,
 			Sync: sync, SyncClass: class, Drift: strings.Join(d.Status.DriftedSections, ", "),
 			Update: d.Status.AvailableFirmware,

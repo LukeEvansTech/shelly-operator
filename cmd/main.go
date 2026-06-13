@@ -42,6 +42,8 @@ import (
 	"github.com/LukeEvansTech/shelly-operator/internal/dashboard"
 	"github.com/LukeEvansTech/shelly-operator/internal/discovery"
 	"github.com/LukeEvansTech/shelly-operator/internal/exporterfeed"
+	"github.com/LukeEvansTech/shelly-operator/internal/metrics"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -94,9 +96,12 @@ func main() {
 	flag.DurationVar(&discoveryInterval, "discovery-interval", 5*time.Minute,
 		"Time between discovery sweeps.")
 	var nameMapName string
+	var registryName string
 	var reconcileInterval time.Duration
 	flag.StringVar(&nameMapName, "name-map", "shelly-names",
 		"ConfigMap mapping lowercased MAC to device name. Empty disables.")
+	flag.StringVar(&registryName, "registry-configmap", "shelly-registry",
+		"ConfigMap holding per-device inventory metadata (name/room/type/note) keyed by lowercased MAC. Empty disables.")
 	flag.DurationVar(&reconcileInterval, "reconcile-interval", 5*time.Minute,
 		"Steady-state drift check interval per device (jittered).")
 	var exporterConfigMap string
@@ -204,6 +209,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Register fleet-health Prometheus metrics. The collector lists ShellyDevices
+	// on every scrape using the manager's cached client (started alongside the
+	// manager). This avoids stale series on device deletion and per-reconcile churn.
+	ctrlmetrics.Registry.MustRegister(
+		metrics.NewDeviceCollector(mgr.GetClient(), deviceNamespace),
+	)
+
 	// +kubebuilder:scaffold:builder
 
 	if err := (&controller.ShellyDeviceReconciler{
@@ -213,10 +225,11 @@ func main() {
 		// (events.k8s.io API), but migrating changes the recorder interface
 		// (no Event method, requires an action field) across the controller
 		// and its test fakes. Deferred; see issue tracker.
-		Recorder:    mgr.GetEventRecorderFor("shellydevice-controller"), //nolint:staticcheck
-		Reader:      mgr.GetAPIReader(),
-		NameMapName: nameMapName,
-		Interval:    reconcileInterval,
+		Recorder:     mgr.GetEventRecorderFor("shellydevice-controller"), //nolint:staticcheck
+		Reader:       mgr.GetAPIReader(),
+		NameMapName:  nameMapName,
+		RegistryName: registryName,
+		Interval:     reconcileInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ShellyDevice")
 		os.Exit(1)
@@ -242,11 +255,12 @@ func main() {
 
 	if dashboardAddr != "" {
 		if err := mgr.Add(&dashboard.Server{
-			Client:      mgr.GetClient(),
-			Reader:      mgr.GetAPIReader(),
-			Namespace:   deviceNamespace,
-			NameMapName: nameMapName,
-			Addr:        dashboardAddr,
+			Client:       mgr.GetClient(),
+			Reader:       mgr.GetAPIReader(),
+			Namespace:    deviceNamespace,
+			NameMapName:  nameMapName,
+			RegistryName: registryName,
+			Addr:         dashboardAddr,
 		}); err != nil {
 			setupLog.Error(err, "unable to add dashboard")
 			os.Exit(1)

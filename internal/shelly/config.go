@@ -16,6 +16,7 @@ var componentMethods = map[string]string{
 	"mqtt":  "MQTT",
 	"cloud": "Cloud",
 	"ble":   "BLE",
+	"ws":    "WS",
 }
 
 type setConfigResult struct {

@@ -2,4 +2,5 @@
 resources:
 - shelly_v1alpha1_shellydevice.yaml
 - shelly_v1alpha1_shellyprofile.yaml
+- shelly_registry_configmap.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

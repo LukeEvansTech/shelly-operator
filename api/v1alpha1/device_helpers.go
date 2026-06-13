@@ -12,6 +12,13 @@ const (
 	LabelGen   = "shelly.thirdimpact.io/gen"
 )
 
+// Label/annotation keys stamped from the device registry ConfigMap.
+const (
+	LabelRoom      = "shelly.thirdimpact.io/room"
+	LabelAppliance = "shelly.thirdimpact.io/appliance"
+	AnnotationNote = "shelly.thirdimpact.io/note"
+)
+
 // DeviceObjectName derives the ShellyDevice object name from a device MAC:
 // lowercase hex with separators stripped, e.g. "3C:8A:1F:EC:8E:3C" ->
 // "3c8a1fec8e3c".

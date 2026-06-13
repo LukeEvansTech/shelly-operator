@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -57,6 +58,11 @@ type ShellyDeviceReconciler struct {
 	// NameMapName is the ConfigMap (in the device's namespace) mapping
 	// lowercased MAC -> desired device name. "" disables the name map.
 	NameMapName string
+
+	// RegistryName is the ConfigMap (in the device's namespace) holding
+	// per-device inventory metadata (name, room, type, note) keyed by
+	// lowercased MAC. "" disables the registry.
+	RegistryName string
 
 	// Interval is the steady-state requeue (jittered, +/-10%); default 5m.
 	Interval time.Duration
@@ -107,12 +113,19 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			wifiErr.Error(), nil, profile.Name)
 	}
 
-	desiredName, nameErr := fleet.ResolveName(ctx, r.Reader, &dev, r.NameMapName)
+	desiredName, nameErr := fleet.ResolveName(ctx, r.Reader, &dev, r.NameMapName, r.RegistryName)
 	if nameErr != nil {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
 			nameErr.Error(), nil, profile.Name)
 	}
 	warns = appendProfileWarnings(profile, desiredName, warns)
+
+	// Stamp registry metadata (room/appliance labels, note annotation) before
+	// the drift check so the object is always current regardless of profile state.
+	if err := r.stampRegistry(ctx, &dev); err != nil {
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+			err.Error(), nil, profile.Name)
+	}
 
 	c := r.deviceClient(dev.Status.Address, password)
 	actual, err := c.GetConfig(ctx)
@@ -144,6 +157,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
 			fmt.Sprintf("fetching schedule jobs: %v", err), nil, profile.Name)
+	}
+	findings, err = appendScheduleFindings(ctx, c, profile, findings)
+	if err != nil {
+		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonConfigFetchFailed,
+			fmt.Sprintf("fetching schedule jobs for schedule section: %v", err), nil, profile.Name)
 	}
 
 	if profile.Spec.Mode == shellyv1alpha1.ModeEnforce && len(findings) > 0 && !dev.Spec.Paused { // defense-in-depth; paused returns earlier
@@ -274,7 +292,7 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	profile *shellyv1alpha1.ShellyProfile, desired map[string]map[string]any,
 	desiredName, password string, wifiPw fleet.WifiPasswords, findings []drift.Finding, authNow bool,
 ) ([]drift.Finding, []string, bool, error) {
-	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), firmwareEnableOf(profile), password, wifiPw)
+	res, applyErr := r.applyFindings(ctx, c, dev, desired, findings, authEnableOf(profile), firmwareEnableOf(profile), password, wifiPw, profile)
 	if len(res.applied) > 0 && r.Recorder != nil {
 		r.Recorder.Event(dev, corev1.EventTypeNormal, "DriftCorrected",
 			fmt.Sprintf("applied sections: %s", strings.Join(res.applied, ", ")))
@@ -308,6 +326,10 @@ func (r *ShellyDeviceReconciler) enforceAndRecheck(
 	findings, err = appendFirmwareFindings(ctx, c, profile, findings)
 	if err != nil {
 		return nil, res.applied, authNow, &recheckError{err: fmt.Errorf("re-checking schedule jobs after enforcement: %w", err)}
+	}
+	findings, err = appendScheduleFindings(ctx, c, profile, findings)
+	if err != nil {
+		return nil, res.applied, authNow, &recheckError{err: fmt.Errorf("re-checking schedule section jobs after enforcement: %w", err)}
 	}
 	return findings, res.applied, authNow, nil
 }
@@ -378,6 +400,104 @@ func authEnableOf(p *shellyv1alpha1.ShellyProfile) *bool {
 		return nil
 	}
 	return p.Spec.Config.Auth.Enable
+}
+
+// stampRegistry reads the registry ConfigMap entry for dev and ensures the
+// device object carries the matching room/appliance labels and note
+// annotation. It merges carefully -- never clobbering discovery's model/app
+// labels or any other pre-existing labels. It only calls Update when
+// something actually changed, and tolerates conflict errors gracefully
+// (the next reconcile will retry).
+func (r *ShellyDeviceReconciler) stampRegistry(ctx context.Context, dev *shellyv1alpha1.ShellyDevice) error {
+	entry, err := fleet.ResolveRegistry(ctx, r.Reader, dev, r.RegistryName)
+	if err != nil {
+		return fmt.Errorf("reading registry: %w", err)
+	}
+
+	want := map[string]string{}
+	if entry.Room != "" {
+		want[shellyv1alpha1.LabelRoom] = fleet.SanitizeLabel(entry.Room)
+	}
+	if entry.Type != "" {
+		want[shellyv1alpha1.LabelAppliance] = fleet.SanitizeLabel(entry.Type)
+	}
+
+	wantAnnotations := map[string]string{}
+	if entry.Note != "" {
+		wantAnnotations[shellyv1alpha1.AnnotationNote] = entry.Note
+	}
+
+	// Determine whether any change is required.
+	changed := false
+	for k, v := range want {
+		if dev.Labels[k] != v {
+			changed = true
+			break
+		}
+	}
+	// Check for labels that should be removed (registry cleared them).
+	if !changed {
+		for _, k := range []string{shellyv1alpha1.LabelRoom, shellyv1alpha1.LabelAppliance} {
+			if _, inWant := want[k]; !inWant {
+				if _, exists := dev.Labels[k]; exists {
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	if !changed {
+		for k, v := range wantAnnotations {
+			if dev.Annotations[k] != v {
+				changed = true
+				break
+			}
+		}
+	}
+	if !changed {
+		// Check for annotation that should be removed.
+		if _, inWant := wantAnnotations[shellyv1alpha1.AnnotationNote]; !inWant {
+			if _, exists := dev.Annotations[shellyv1alpha1.AnnotationNote]; exists {
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return nil
+	}
+
+	base := dev.DeepCopy()
+
+	// Apply desired labels (merge, never clobber existing ones not in our set).
+	if dev.Labels == nil {
+		dev.Labels = map[string]string{}
+	}
+	maps.Copy(dev.Labels, want)
+	// Remove labels the registry no longer provides.
+	for _, k := range []string{shellyv1alpha1.LabelRoom, shellyv1alpha1.LabelAppliance} {
+		if _, inWant := want[k]; !inWant {
+			delete(dev.Labels, k)
+		}
+	}
+
+	// Apply desired annotations.
+	if dev.Annotations == nil {
+		dev.Annotations = map[string]string{}
+	}
+	maps.Copy(dev.Annotations, wantAnnotations)
+	if _, inWant := wantAnnotations[shellyv1alpha1.AnnotationNote]; !inWant {
+		delete(dev.Annotations, shellyv1alpha1.AnnotationNote)
+	}
+
+	if err := r.Patch(ctx, dev, client.MergeFrom(base)); err != nil {
+		if apierrors.IsConflict(err) {
+			// Stale resourceVersion: another writer changed the object. Our
+			// update will land on the next reconcile.
+			return nil
+		}
+		return fmt.Errorf("stamping registry labels: %w", err)
+	}
+	return nil
 }
 
 // jitter spreads requeues +/-10% so 46 devices don't thunder in lockstep.

@@ -53,7 +53,7 @@ func dev(displayName string) *shellyv1alpha1.ShellyDevice {
 
 func TestResolveNameDisplayNameWins(t *testing.T) {
 	r := stubReader{cms: map[string]*corev1.ConfigMap{"shelly-names": {Data: map[string]string{"aabbccddee01": "from-map"}}}}
-	got, err := ResolveName(context.Background(), r, dev("front-desk"), "shelly-names")
+	got, err := ResolveName(context.Background(), r, dev("front-desk"), "shelly-names", "")
 	if err != nil || got != "front-desk" {
 		t.Errorf("got %q, %v; want front-desk", got, err)
 	}
@@ -61,14 +61,14 @@ func TestResolveNameDisplayNameWins(t *testing.T) {
 
 func TestResolveNameFromMap(t *testing.T) {
 	r := stubReader{cms: map[string]*corev1.ConfigMap{"shelly-names": {Data: map[string]string{"aabbccddee01": "rack-pdu"}}}}
-	got, err := ResolveName(context.Background(), r, dev(""), "shelly-names")
+	got, err := ResolveName(context.Background(), r, dev(""), "shelly-names", "")
 	if err != nil || got != "rack-pdu" {
 		t.Errorf("got %q, %v; want rack-pdu", got, err)
 	}
 }
 
 func TestResolveNameMissingMapIsEmpty(t *testing.T) {
-	got, err := ResolveName(context.Background(), stubReader{}, dev(""), "shelly-names")
+	got, err := ResolveName(context.Background(), stubReader{}, dev(""), "shelly-names", "")
 	if err != nil || got != "" {
 		t.Errorf("got %q, %v; want empty, nil", got, err)
 	}
@@ -76,15 +76,111 @@ func TestResolveNameMissingMapIsEmpty(t *testing.T) {
 
 func TestResolveNameReadErrorPropagates(t *testing.T) {
 	r := stubReader{err: fmt.Errorf("boom")}
-	if _, err := ResolveName(context.Background(), r, dev(""), "shelly-names"); err == nil || !strings.Contains(err.Error(), "name map") {
+	if _, err := ResolveName(context.Background(), r, dev(""), "shelly-names", ""); err == nil || !strings.Contains(err.Error(), "name map") {
 		t.Errorf("want wrapped error, got %v", err)
 	}
 }
 
 func TestResolveNameDisabled(t *testing.T) {
-	got, err := ResolveName(context.Background(), stubReader{err: fmt.Errorf("must not be called")}, dev(""), "")
+	got, err := ResolveName(context.Background(), stubReader{err: fmt.Errorf("must not be called")}, dev(""), "", "")
 	if err != nil || got != "" {
 		t.Errorf("empty map name must disable lookups: %q, %v", got, err)
+	}
+}
+
+// TestResolveNameRegistryWinsOverMap verifies that a registry "name" field
+// beats the name-map but yields to spec.displayName.
+func TestResolveNameRegistryWinsOverMap(t *testing.T) {
+	r := stubReader{cms: map[string]*corev1.ConfigMap{
+		"shelly-names":    {Data: map[string]string{"aabbccddee01": "from-map"}},
+		"shelly-registry": {Data: map[string]string{"aabbccddee01": `{"name":"from-registry"}`}},
+	}}
+	got, err := ResolveName(context.Background(), r, dev(""), "shelly-names", "shelly-registry")
+	if err != nil || got != "from-registry" {
+		t.Errorf("got %q, %v; want from-registry (registry beats name-map)", got, err)
+	}
+}
+
+// TestResolveNameDisplayNameBeatsRegistry: displayName > registry > name-map.
+func TestResolveNameDisplayNameBeatsRegistry(t *testing.T) {
+	r := stubReader{cms: map[string]*corev1.ConfigMap{
+		"shelly-registry": {Data: map[string]string{"aabbccddee01": `{"name":"from-registry"}`}},
+	}}
+	got, err := ResolveName(context.Background(), r, dev("display-wins"), "shelly-names", "shelly-registry")
+	if err != nil || got != "display-wins" {
+		t.Errorf("got %q, %v; want display-wins (displayName beats registry)", got, err)
+	}
+}
+
+// TestResolveNameRegistryFallsBackToMap: no registry name -> use name-map.
+func TestResolveNameRegistryFallsBackToMap(t *testing.T) {
+	r := stubReader{cms: map[string]*corev1.ConfigMap{
+		"shelly-names":    {Data: map[string]string{"aabbccddee01": "from-map"}},
+		"shelly-registry": {Data: map[string]string{"aabbccddee01": `{"room":"lounge"}`}},
+	}}
+	got, err := ResolveName(context.Background(), r, dev(""), "shelly-names", "shelly-registry")
+	if err != nil || got != "from-map" {
+		t.Errorf("got %q, %v; want from-map (registry has no name, falls back)", got, err)
+	}
+}
+
+// TestResolveRegistryMissingConfigMap: absent ConfigMap -> zero entry, no error.
+func TestResolveRegistryMissingConfigMap(t *testing.T) {
+	entry, err := ResolveRegistry(context.Background(), stubReader{}, dev(""), "shelly-registry")
+	if err != nil || entry != (RegistryEntry{}) {
+		t.Errorf("got %+v, %v; want zero, nil", entry, err)
+	}
+}
+
+// TestResolveRegistryValidJSON: fully populated entry.
+func TestResolveRegistryValidJSON(t *testing.T) {
+	r := stubReader{cms: map[string]*corev1.ConfigMap{
+		"shelly-registry": {Data: map[string]string{
+			"aabbccddee01": `{"name":"desk-lamp","room":"Office","type":"Lamp","note":"top shelf"}`,
+		}},
+	}}
+	entry, err := ResolveRegistry(context.Background(), r, dev(""), "shelly-registry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Name != "desk-lamp" || entry.Room != "Office" || entry.Type != "Lamp" || entry.Note != "top shelf" {
+		t.Errorf("unexpected entry: %+v", entry)
+	}
+}
+
+// TestResolveRegistryPartialJSON: missing fields default to zero.
+func TestResolveRegistryPartialJSON(t *testing.T) {
+	r := stubReader{cms: map[string]*corev1.ConfigMap{
+		"shelly-registry": {Data: map[string]string{
+			"aabbccddee01": `{"room":"Kitchen"}`,
+		}},
+	}}
+	entry, err := ResolveRegistry(context.Background(), r, dev(""), "shelly-registry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Room != "Kitchen" || entry.Name != "" || entry.Type != "" || entry.Note != "" {
+		t.Errorf("unexpected entry: %+v", entry)
+	}
+}
+
+// TestResolveRegistryDisabled: empty registryName returns zero without touching reader.
+func TestResolveRegistryDisabled(t *testing.T) {
+	r := stubReader{err: fmt.Errorf("must not be called")}
+	entry, err := ResolveRegistry(context.Background(), r, dev(""), "")
+	if err != nil || entry != (RegistryEntry{}) {
+		t.Errorf("got %+v, %v; want zero, nil", entry, err)
+	}
+}
+
+// TestResolveRegistryMissingEntry: ConfigMap exists but has no entry for the device.
+func TestResolveRegistryMissingEntry(t *testing.T) {
+	r := stubReader{cms: map[string]*corev1.ConfigMap{
+		"shelly-registry": {Data: map[string]string{"other-mac": `{"room":"Den"}`}},
+	}}
+	entry, err := ResolveRegistry(context.Background(), r, dev(""), "shelly-registry")
+	if err != nil || entry != (RegistryEntry{}) {
+		t.Errorf("got %+v, %v; want zero, nil", entry, err)
 	}
 }
 

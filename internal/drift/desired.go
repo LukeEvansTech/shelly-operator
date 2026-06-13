@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"regexp"
+	"strconv"
 	"strings"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
@@ -30,19 +31,8 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		out["sys"] = sys
 	}
 
-	if cfg.MQTT != nil {
-		m := map[string]any{}
-		if cfg.MQTT.Enable != nil {
-			m["enable"] = *cfg.MQTT.Enable
-		}
-		// Server renders independently of Enable so the broker address can
-		// be pre-configured while MQTT remains disabled.
-		if cfg.MQTT.Server != "" {
-			m["server"] = cfg.MQTT.Server
-		}
-		if len(m) > 0 {
-			out["mqtt"] = m
-		}
+	if m := renderMQTT(cfg.MQTT); len(m) > 0 {
+		out["mqtt"] = m
 	}
 
 	if cfg.Cloud != nil && cfg.Cloud.Enable != nil {
@@ -61,50 +51,18 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		if n := renderWifiNetwork(cfg.Wifi.Sta1); n != nil {
 			w["sta1"] = n
 		}
+		if ap := renderWifiAP(cfg.Wifi.AP); ap != nil {
+			w["ap"] = ap
+		}
+		if roam := renderWifiRoam(cfg.Wifi.Roam); roam != nil {
+			w["roam"] = roam
+		}
 		if len(w) > 0 {
 			out["wifi"] = w
 		}
 	}
 
-	if cfg.Switch != nil {
-		sw := map[string]any{}
-		if cfg.Switch.InitialState != nil {
-			sw["initial_state"] = *cfg.Switch.InitialState
-		}
-		if cfg.Switch.AutoOn != nil {
-			sw["auto_on"] = *cfg.Switch.AutoOn
-		}
-		if cfg.Switch.AutoOnDelay != nil {
-			sw["auto_on_delay"] = float64(*cfg.Switch.AutoOnDelay)
-		}
-		if cfg.Switch.AutoOff != nil {
-			sw["auto_off"] = *cfg.Switch.AutoOff
-		}
-		if cfg.Switch.AutoOffDelay != nil {
-			sw["auto_off_delay"] = float64(*cfg.Switch.AutoOffDelay)
-		}
-		if cfg.Switch.PowerLimit != nil {
-			sw["power_limit"] = float64(*cfg.Switch.PowerLimit)
-		}
-		if cfg.Switch.VoltageLimit != nil {
-			sw["voltage_limit"] = float64(*cfg.Switch.VoltageLimit)
-		}
-		if cfg.Switch.CurrentLimit != nil {
-			sw["current_limit"] = float64(*cfg.Switch.CurrentLimit)
-		}
-		if cfg.Switch.AutorecoverVoltageErrors != nil {
-			sw["autorecover_voltage_errors"] = *cfg.Switch.AutorecoverVoltageErrors
-		}
-		if len(sw) > 0 {
-			for comp := range actual {
-				if strings.HasPrefix(comp, "switch:") {
-					cp := make(map[string]any, len(sw))
-					maps.Copy(cp, sw)
-					out[comp] = cp
-				}
-			}
-		}
-	}
+	renderSwitchComponents(cfg.Switch, actual, out)
 
 	if cfg.UI != nil {
 		if uiKey := discoverUIKey(actual); uiKey != "" {
@@ -234,13 +192,18 @@ func uiControlSwitchKeys(raw json.RawMessage) []string {
 
 // renderSys builds the desired "sys" component map from the system and name
 // sections. Fields are nested under their correct sub-object (device for
-// eco_mode and name, location for tz) so that a partial sys map is safe:
-// Shelly's SetConfig deep-merges, and Diff compares only declared leaves.
+// eco_mode, discoverable, and name; location for tz/lat/lon; sntp for
+// server) so that a partial sys map is safe: Shelly's SetConfig
+// deep-merges, and Diff compares only declared leaves.
 func renderSys(sys *shellyv1alpha1.SystemSection, name *shellyv1alpha1.NameSection, desiredName string) map[string]any {
 	out := map[string]any{}
+
 	device := map[string]any{}
 	if sys != nil && sys.EcoMode != nil {
 		device["eco_mode"] = *sys.EcoMode
+	}
+	if sys != nil && sys.Discoverable != nil {
+		device["discoverable"] = *sys.Discoverable
 	}
 	if name != nil && name.Managed && desiredName != "" {
 		device["name"] = desiredName
@@ -248,10 +211,106 @@ func renderSys(sys *shellyv1alpha1.SystemSection, name *shellyv1alpha1.NameSecti
 	if len(device) > 0 {
 		out["device"] = device
 	}
-	if sys != nil && sys.Timezone != nil {
-		out["location"] = map[string]any{"tz": *sys.Timezone}
+
+	if sys != nil {
+		location := renderSysLocation(sys)
+		if len(location) > 0 {
+			out["location"] = location
+		}
+		if sys.SNTPServer != nil {
+			out["sntp"] = map[string]any{"server": *sys.SNTPServer}
+		}
 	}
+
 	return out
+}
+
+// renderSysLocation builds the sys.location sub-map from Timezone,
+// Latitude, and Longitude. Latitude and Longitude are validated by the
+// CRD pattern so ParseFloat should always succeed; on the rare chance it
+// doesn't (e.g. a hand-edited object bypassing validation) the leaf is
+// silently skipped rather than failing Render.
+func renderSysLocation(sys *shellyv1alpha1.SystemSection) map[string]any {
+	loc := map[string]any{}
+	if sys.Timezone != nil {
+		loc["tz"] = *sys.Timezone
+	}
+	if sys.Latitude != nil {
+		if f, err := strconv.ParseFloat(*sys.Latitude, 64); err == nil {
+			loc["lat"] = f
+		}
+	}
+	if sys.Longitude != nil {
+		if f, err := strconv.ParseFloat(*sys.Longitude, 64); err == nil {
+			loc["lon"] = f
+		}
+	}
+	return loc
+}
+
+// renderMQTT builds the desired "mqtt" component map. Server renders
+// independently of Enable so the broker address can be pre-configured
+// while MQTT remains disabled.
+func renderMQTT(mqtt *shellyv1alpha1.MQTTSection) map[string]any {
+	if mqtt == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if mqtt.Enable != nil {
+		m["enable"] = *mqtt.Enable
+	}
+	if mqtt.Server != "" {
+		m["server"] = mqtt.Server
+	}
+	return m
+}
+
+// renderSwitchComponents builds a per-switch-component desired map from
+// the switch section and writes each matched "switch:N" component into
+// out. Extracted to keep Render's cyclomatic complexity within the
+// linter's limit.
+func renderSwitchComponents(sw *shellyv1alpha1.SwitchSection, actual map[string]json.RawMessage, out map[string]map[string]any) {
+	if sw == nil {
+		return
+	}
+	m := map[string]any{}
+	if sw.InitialState != nil {
+		m["initial_state"] = *sw.InitialState
+	}
+	if sw.AutoOn != nil {
+		m["auto_on"] = *sw.AutoOn
+	}
+	if sw.AutoOnDelay != nil {
+		m["auto_on_delay"] = float64(*sw.AutoOnDelay)
+	}
+	if sw.AutoOff != nil {
+		m["auto_off"] = *sw.AutoOff
+	}
+	if sw.AutoOffDelay != nil {
+		m["auto_off_delay"] = float64(*sw.AutoOffDelay)
+	}
+	if sw.PowerLimit != nil {
+		m["power_limit"] = float64(*sw.PowerLimit)
+	}
+	if sw.VoltageLimit != nil {
+		m["voltage_limit"] = float64(*sw.VoltageLimit)
+	}
+	if sw.CurrentLimit != nil {
+		m["current_limit"] = float64(*sw.CurrentLimit)
+	}
+	if sw.AutorecoverVoltageErrors != nil {
+		m["autorecover_voltage_errors"] = *sw.AutorecoverVoltageErrors
+	}
+	if len(m) == 0 {
+		return
+	}
+	for comp := range actual {
+		if strings.HasPrefix(comp, "switch:") {
+			cp := make(map[string]any, len(m))
+			maps.Copy(cp, m)
+			out[comp] = cp
+		}
+	}
 }
 
 // renderWifiNetwork emits the diffable leaves of one WiFi network. The
@@ -268,6 +327,45 @@ func renderWifiNetwork(n *shellyv1alpha1.WifiNetwork) map[string]any {
 	}
 	if n.SSID != "" {
 		m["ssid"] = n.SSID
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// renderWifiAP emits the desired wifi.ap sub-map. range_extender is a
+// nested object on the device with its own enable key.
+func renderWifiAP(ap *shellyv1alpha1.WifiAP) map[string]any {
+	if ap == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if ap.Enable != nil {
+		m["enable"] = *ap.Enable
+	}
+	if ap.RangeExtender != nil {
+		m["range_extender"] = map[string]any{"enable": *ap.RangeExtender}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// renderWifiRoam emits the desired wifi.roam sub-map. Numeric values are
+// emitted as float64 so Diff's leafEqual compares them correctly against
+// the device's JSON-decoded numbers.
+func renderWifiRoam(roam *shellyv1alpha1.WifiRoam) map[string]any {
+	if roam == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if roam.RSSIThreshold != nil {
+		m["rssi_thr"] = float64(*roam.RSSIThreshold)
+	}
+	if roam.Interval != nil {
+		m["interval"] = float64(*roam.Interval)
 	}
 	if len(m) == 0 {
 		return nil

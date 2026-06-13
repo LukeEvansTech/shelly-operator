@@ -216,6 +216,326 @@ func TestRenderSysEcoModeDoesNotClobberTimezone(t *testing.T) {
 	}
 }
 
+// ---- Feature A: SNTPServer, Discoverable, Latitude, Longitude tests ----------
+
+func TestRenderSysSNTPServer(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{SNTPServer: ptr("time.cloudflare.com")},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	sntp, ok := sys["sntp"].(map[string]any)
+	if !ok {
+		t.Fatalf("sys.sntp not a map: %#v", sys["sntp"])
+	}
+	if sntp["server"] != "time.cloudflare.com" {
+		t.Errorf("sys.sntp.server = %v, want time.cloudflare.com", sntp["server"])
+	}
+	// sntp must not clobber device or location.
+	if _, has := sys["device"]; has {
+		t.Errorf("sntp-only render must not include device sub-map, got %#v", sys)
+	}
+	if _, has := sys["location"]; has {
+		t.Errorf("sntp-only render must not include location sub-map, got %#v", sys)
+	}
+}
+
+func TestRenderSysDiscoverable(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{Discoverable: ptr(false)},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	device, ok := sys["device"].(map[string]any)
+	if !ok {
+		t.Fatalf("sys.device not a map: %#v", sys["device"])
+	}
+	if device["discoverable"] != false {
+		t.Errorf("sys.device.discoverable = %v, want false", device["discoverable"])
+	}
+	// Must not include location or sntp.
+	if _, has := sys["location"]; has {
+		t.Errorf("discoverable-only render must not include location, got %#v", sys)
+	}
+	if _, has := sys["sntp"]; has {
+		t.Errorf("discoverable-only render must not include sntp, got %#v", sys)
+	}
+}
+
+func TestRenderSysDiscoverableDoesNotClobberEcoMode(t *testing.T) {
+	// Both eco_mode and discoverable must appear in device sub-map together.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			EcoMode:      ptr(true),
+			Discoverable: ptr(false),
+		},
+	}
+	got := Render(cfg, "", nil)
+	device, ok := got["sys"]["device"].(map[string]any)
+	if !ok {
+		t.Fatalf("sys.device not a map: %#v", got["sys"]["device"])
+	}
+	if device["eco_mode"] != true {
+		t.Errorf("eco_mode = %v, want true", device["eco_mode"])
+	}
+	if device["discoverable"] != false {
+		t.Errorf("discoverable = %v, want false", device["discoverable"])
+	}
+}
+
+func TestRenderSysLatLon(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			Latitude:  ptr("51.5074"),
+			Longitude: ptr("-0.1278"),
+		},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+	location, ok := sys["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("sys.location not a map: %#v", sys["location"])
+	}
+	if location["lat"] != 51.5074 {
+		t.Errorf("sys.location.lat = %v (%T), want 51.5074 (float64)", location["lat"], location["lat"])
+	}
+	if location["lon"] != -0.1278 {
+		t.Errorf("sys.location.lon = %v (%T), want -0.1278 (float64)", location["lon"], location["lon"])
+	}
+}
+
+func TestRenderSysLatLonDoesNotClobberTimezone(t *testing.T) {
+	// Timezone, Latitude, and Longitude all go under location; none must
+	// clobber the others.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			Timezone:  ptr("Europe/London"),
+			Latitude:  ptr("51.5074"),
+			Longitude: ptr("-0.1278"),
+		},
+	}
+	got := Render(cfg, "", nil)
+	location, ok := got["sys"]["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("sys.location not a map: %#v", got["sys"]["location"])
+	}
+	if location["tz"] != "Europe/London" {
+		t.Errorf("tz = %v, want Europe/London", location["tz"])
+	}
+	if location["lat"] != 51.5074 {
+		t.Errorf("lat = %v, want 51.5074", location["lat"])
+	}
+	if location["lon"] != -0.1278 {
+		t.Errorf("lon = %v, want -0.1278", location["lon"])
+	}
+}
+
+func TestRenderSysAllSubSectionsTogether(t *testing.T) {
+	// eco_mode + discoverable + timezone + lat + lon + sntp all declared:
+	// device, location, and sntp sub-maps must all be present and correct.
+	cfg := shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			EcoMode:      ptr(true),
+			Discoverable: ptr(false),
+			Timezone:     ptr("UTC"),
+			Latitude:     ptr("0"),
+			Longitude:    ptr("0"),
+			SNTPServer:   ptr("pool.ntp.org"),
+		},
+	}
+	got := Render(cfg, "", nil)
+	sys := got["sys"]
+
+	device, okD := sys["device"].(map[string]any)
+	location, okL := sys["location"].(map[string]any)
+	sntp, okS := sys["sntp"].(map[string]any)
+
+	if !okD {
+		t.Errorf("sys.device missing or not a map: %#v", sys["device"])
+	} else {
+		if device["eco_mode"] != true {
+			t.Errorf("eco_mode = %v, want true", device["eco_mode"])
+		}
+		if device["discoverable"] != false {
+			t.Errorf("discoverable = %v, want false", device["discoverable"])
+		}
+	}
+	if !okL {
+		t.Errorf("sys.location missing or not a map: %#v", sys["location"])
+	} else {
+		if location["tz"] != "UTC" {
+			t.Errorf("tz = %v, want UTC", location["tz"])
+		}
+		if location["lat"] != float64(0) {
+			t.Errorf("lat = %v, want 0.0", location["lat"])
+		}
+		if location["lon"] != float64(0) {
+			t.Errorf("lon = %v, want 0.0", location["lon"])
+		}
+	}
+	if !okS {
+		t.Errorf("sys.sntp missing or not a map: %#v", sys["sntp"])
+	} else if sntp["server"] != "pool.ntp.org" {
+		t.Errorf("sntp.server = %v, want pool.ntp.org", sntp["server"])
+	}
+}
+
+func TestRenderSysNilUnmanagedNoSNTPOrLatLon(t *testing.T) {
+	// Empty SystemSection must not emit any sub-maps.
+	cfg := shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{}}
+	got := Render(cfg, "", nil)
+	if len(got) != 0 {
+		t.Errorf("empty SystemSection must render nothing, got %v", got)
+	}
+}
+
+// ---- Feature B: WifiAP and WifiRoam tests ------------------------------------
+
+func TestRenderWifiAP(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			AP: &shellyv1alpha1.WifiAP{Enable: ptr(false)},
+		},
+	}
+	got := Render(cfg, "", nil)
+	wifi := got["wifi"]
+	if wifi == nil {
+		t.Fatalf("expected wifi in output")
+	}
+	ap, ok := wifi["ap"].(map[string]any)
+	if !ok {
+		t.Fatalf("wifi.ap not a map: %#v", wifi["ap"])
+	}
+	if ap["enable"] != false {
+		t.Errorf("wifi.ap.enable = %v, want false", ap["enable"])
+	}
+	// Must not include sta/sta1 when not declared.
+	if _, has := wifi["sta"]; has {
+		t.Errorf("AP-only wifi must not include sta: %#v", wifi)
+	}
+}
+
+func TestRenderWifiAPRangeExtender(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			AP: &shellyv1alpha1.WifiAP{
+				Enable:        ptr(true),
+				RangeExtender: ptr(false),
+			},
+		},
+	}
+	got := Render(cfg, "", nil)
+	ap, ok := got["wifi"]["ap"].(map[string]any)
+	if !ok {
+		t.Fatalf("wifi.ap not a map")
+	}
+	if ap["enable"] != true {
+		t.Errorf("wifi.ap.enable = %v, want true", ap["enable"])
+	}
+	re, ok2 := ap["range_extender"].(map[string]any)
+	if !ok2 {
+		t.Fatalf("wifi.ap.range_extender not a map: %#v", ap["range_extender"])
+	}
+	if re["enable"] != false {
+		t.Errorf("wifi.ap.range_extender.enable = %v, want false", re["enable"])
+	}
+}
+
+func TestRenderWifiRoam(t *testing.T) {
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			Roam: &shellyv1alpha1.WifiRoam{
+				RSSIThreshold: ptr(int32(-80)),
+				Interval:      ptr(int32(60)),
+			},
+		},
+	}
+	got := Render(cfg, "", nil)
+	wifi := got["wifi"]
+	if wifi == nil {
+		t.Fatalf("expected wifi in output")
+	}
+	roam, ok := wifi["roam"].(map[string]any)
+	if !ok {
+		t.Fatalf("wifi.roam not a map: %#v", wifi["roam"])
+	}
+	if roam["rssi_thr"] != float64(-80) {
+		t.Errorf("wifi.roam.rssi_thr = %v (%T), want -80.0 (float64)", roam["rssi_thr"], roam["rssi_thr"])
+	}
+	if roam["interval"] != float64(60) {
+		t.Errorf("wifi.roam.interval = %v (%T), want 60.0 (float64)", roam["interval"], roam["interval"])
+	}
+}
+
+func TestRenderWifiAPAndRoamTogetherWithSta(t *testing.T) {
+	// AP, Roam, and Sta all declared together -- all three must appear.
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			Sta:  &shellyv1alpha1.WifiNetwork{Enable: ptr(true), SSID: "iot"},
+			AP:   &shellyv1alpha1.WifiAP{Enable: ptr(false)},
+			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: ptr(int32(-75))},
+		},
+	}
+	got := Render(cfg, "", nil)
+	wifi := got["wifi"]
+	if _, has := wifi["sta"]; !has {
+		t.Error("sta missing from wifi output")
+	}
+	if _, has := wifi["ap"]; !has {
+		t.Error("ap missing from wifi output")
+	}
+	if _, has := wifi["roam"]; !has {
+		t.Error("roam missing from wifi output")
+	}
+}
+
+func TestRenderWifiAPNilUnmanaged(t *testing.T) {
+	// WifiAP with no fields set must produce no ap sub-map.
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			AP: &shellyv1alpha1.WifiAP{},
+		},
+	}
+	got := Render(cfg, "", nil)
+	if got["wifi"] != nil {
+		t.Errorf("empty WifiAP must render nothing, got %#v", got["wifi"])
+	}
+}
+
+func TestRenderWifiRoamNilUnmanaged(t *testing.T) {
+	// WifiRoam with no fields set must produce no roam sub-map.
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			Roam: &shellyv1alpha1.WifiRoam{},
+		},
+	}
+	got := Render(cfg, "", nil)
+	if got["wifi"] != nil {
+		t.Errorf("empty WifiRoam must render nothing, got %#v", got["wifi"])
+	}
+}
+
+func TestRenderWifiAPRoamNoPasswords(t *testing.T) {
+	// Verify that AP and Roam renders contain no password-related keys.
+	cfg := shellyv1alpha1.ProfileConfig{
+		Wifi: &shellyv1alpha1.WifiSection{
+			AP:   &shellyv1alpha1.WifiAP{Enable: ptr(true), RangeExtender: ptr(false)},
+			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: ptr(int32(-70)), Interval: ptr(int32(30))},
+		},
+	}
+	got := Render(cfg, "", nil)
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, bad := range []string{"pass", "password", "psk"} {
+		if strings.Contains(strings.ToLower(s), bad) {
+			t.Errorf("rendered wifi AP/Roam must not contain %q: %s", bad, s)
+		}
+	}
+}
+
 // ---- UI section tests -------------------------------------------------------
 
 func plugActual(t *testing.T) map[string]json.RawMessage {

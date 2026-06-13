@@ -196,10 +196,33 @@ spec:
                   system:
                     description: SystemSection maps to the device's sys configuration.
                     properties:
+                      discoverable:
+                        description: |-
+                          Discoverable controls whether the device is visible via mDNS/BLE
+                          advertisement (sys.device.discoverable).
+                        type: boolean
                       ecoMode:
                         description: EcoMode toggles the device's power-saving mode
                           (sys.device.eco_mode).
                         type: boolean
+                      latitude:
+                        description: |-
+                          Latitude sets the device's geographic latitude (sys.location.lat).
+                          Must be a decimal number, e.g. "51.5074". Used for sunrise/sunset
+                          schedules on the device.
+                        pattern: ^-?\d+(\.\d+)?$
+                        type: string
+                      longitude:
+                        description: |-
+                          Longitude sets the device's geographic longitude (sys.location.lon).
+                          Must be a decimal number, e.g. "-0.1278".
+                        pattern: ^-?\d+(\.\d+)?$
+                        type: string
+                      sntpServer:
+                        description: |-
+                          SNTPServer sets the NTP server the device uses for time sync
+                          (sys.sntp.server), e.g. "time.cloudflare.com".
+                        type: string
                       timezone:
                         description: |-
                           Timezone sets the device's local timezone (sys.location.tz), e.g.
@@ -263,13 +286,45 @@ spec:
                     type: object
                   wifi:
                     description: |-
-                      WifiSection maps to the device's wifi configuration. Only the sta
-                      (primary) and sta1 (fallback) client networks are managed; AP and
-                      roaming settings are untouched. Devices never report stored WiFi
-                      passwords, so password drift is undetectable -- passwords are injected
-                      at apply time whenever a network's section is written for another
-                      reason (ssid or enable drift).
+                      WifiSection maps to the device's wifi configuration. The sta (primary)
+                      and sta1 (fallback) client networks are managed, as are the onboard AP
+                      and roaming settings. Devices never report stored WiFi passwords, so
+                      password drift is undetectable -- passwords are injected at apply time
+                      whenever a network's section is written for another reason (ssid or
+                      enable drift). AP and roam fields carry no passwords and are diffed
+                      directly.
                     properties:
+                      ap:
+                        description: AP configures the device's onboard access point
+                          (wifi.ap).
+                        properties:
+                          enable:
+                            description: Enable turns the onboard AP on or off (wifi.ap.enable).
+                            type: boolean
+                          rangeExtender:
+                            description: |-
+                              RangeExtender enables the AP range-extender mode
+                              (wifi.ap.range_extender.enable).
+                            type: boolean
+                        type: object
+                      roam:
+                        description: Roam configures the client roaming parameters
+                          (wifi.roam).
+                        properties:
+                          interval:
+                            description: |-
+                              Interval is the roaming scan interval in seconds
+                              (wifi.roam.interval).
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          rssiThreshold:
+                            description: |-
+                              RSSIThreshold is the RSSI level (dBm) below which the device will
+                              attempt to roam to a stronger AP (wifi.roam.rssi_thr).
+                            format: int32
+                            type: integer
+                        type: object
                       sta:
                         description: Sta is the primary client network.
                         properties:

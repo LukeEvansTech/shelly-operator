@@ -15,14 +15,28 @@ import (
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 )
 
-// ResolveName returns the desired device name: spec.displayName first,
-// falling back to the name-map ConfigMap (keyed by the device object
-// name, i.e. lowercased MAC). nameMapName "" disables the map. A missing
-// ConfigMap means "" (unmanaged); any other read error propagates so a
-// transient API failure can't masquerade as in-sync.
-func ResolveName(ctx context.Context, reader client.Reader, dev *shellyv1alpha1.ShellyDevice, nameMapName string) (string, error) {
+// ResolveName returns the desired device name using the priority:
+//
+//  1. spec.displayName (user override, always wins)
+//  2. registry ConfigMap entry's "name" field (registryName "shelly-registry")
+//  3. name-map ConfigMap entry (nameMapName "shelly-names")
+//
+// Either name is "" to disable the corresponding lookup. A missing ConfigMap
+// means "" (unmanaged); any other read error propagates so a transient API
+// failure can't masquerade as in-sync.
+func ResolveName(ctx context.Context, reader client.Reader, dev *shellyv1alpha1.ShellyDevice, nameMapName, registryName string) (string, error) {
 	if dev.Spec.DisplayName != "" {
 		return dev.Spec.DisplayName, nil
+	}
+	// Registry name takes priority over name-map.
+	if registryName != "" && reader != nil {
+		entry, err := ResolveRegistry(ctx, reader, dev, registryName)
+		if err != nil {
+			return "", err
+		}
+		if entry.Name != "" {
+			return entry.Name, nil
+		}
 	}
 	if nameMapName == "" || reader == nil {
 		return "", nil

@@ -43,6 +43,10 @@ func Render(cfg shellyv1alpha1.ProfileConfig, desiredName string, actual map[str
 		out["ble"] = map[string]any{"enable": *cfg.BLE.Enable}
 	}
 
+	if cfg.WS != nil && cfg.WS.Enable != nil {
+		out["ws"] = map[string]any{"enable": *cfg.WS.Enable}
+	}
+
 	if cfg.Wifi != nil {
 		w := map[string]any{}
 		if n := renderWifiNetwork(cfg.Wifi.Sta); n != nil {
@@ -219,6 +223,9 @@ func renderSys(sys *shellyv1alpha1.SystemSection, name *shellyv1alpha1.NameSecti
 		}
 		if sys.SNTPServer != nil {
 			out["sntp"] = map[string]any{"server": *sys.SNTPServer}
+		}
+		if sys.DebugLevel != nil {
+			out["debug"] = map[string]any{"level": float64(*sys.DebugLevel)}
 		}
 	}
 

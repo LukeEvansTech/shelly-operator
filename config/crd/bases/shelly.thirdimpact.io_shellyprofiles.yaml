@@ -196,6 +196,14 @@ spec:
                   system:
                     description: SystemSection maps to the device's sys configuration.
                     properties:
+                      debugLevel:
+                        description: |-
+                          DebugLevel sets the device's debug verbosity (sys.debug.level).
+                          Shelly devices accept levels 0-4; 0 disables debug output. Only
+                          non-negative values are accepted.
+                        format: int32
+                        minimum: 0
+                        type: integer
                       discoverable:
                         description: |-
                           Discoverable controls whether the device is visible via mDNS/BLE
@@ -399,6 +407,13 @@ spec:
                     - message: sta and sta1 must not declare the same ssid
                       rule: '!has(self.sta) || !has(self.sta1) || !has(self.sta.ssid)
                         || !has(self.sta1.ssid) || self.sta.ssid != self.sta1.ssid'
+                  ws:
+                    description: WSSection maps to the device's outbound WebSocket
+                      (ws) configuration.
+                    properties:
+                      enable:
+                        type: boolean
+                    type: object
                 type: object
               mode:
                 default: observe

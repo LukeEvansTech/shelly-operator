@@ -54,3 +54,12 @@ func TestApplyOrderUIWithSwitches(t *testing.T) {
 		t.Fatalf("ApplyOrder = %v, want %v", got, want)
 	}
 }
+
+func TestApplyOrderWSBeforeAuthAndWifi(t *testing.T) {
+	// ws ranks 3 alongside cloud and ble, well before auth and wifi dead last.
+	got := ApplyOrder([]string{"wifi", "auth", "ws", "ble", "cloud", "sys"})
+	want := []string{"sys", "ble", "cloud", "ws", "auth", "wifi"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("ApplyOrder = %v, want %v", got, want)
+	}
+}

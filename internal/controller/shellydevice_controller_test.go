@@ -24,6 +24,7 @@ import (
 const (
 	rpcSysSetConfig  = "Sys.SetConfig"
 	rpcWifiSetConfig = "Wifi.SetConfig"
+	sntpCloudflare   = "time.cloudflare.com"
 )
 
 func hostOf(url string) string { return strings.TrimPrefix(url, "http://") }
@@ -1612,7 +1613,7 @@ func TestEnforceSysSNTPServer(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDE001", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{SNTPServer: strPtr("time.cloudflare.com")},
+		System: &shellyv1alpha1.SystemSection{SNTPServer: strPtr(sntpCloudflare)},
 	})
 
 	r, _ := newReconciler()
@@ -1620,8 +1621,8 @@ func TestEnforceSysSNTPServer(t *testing.T) {
 
 	snap := fake.ConfigSnapshot()["sys"]
 	sntp, ok := snap["sntp"].(map[string]any)
-	if !ok || sntp["server"] != "time.cloudflare.com" {
-		t.Errorf("sys.sntp.server = %v, want time.cloudflare.com", snap["sntp"])
+	if !ok || sntp["server"] != sntpCloudflare {
+		t.Errorf("sys.sntp.server = %v, want %s", snap["sntp"], sntpCloudflare)
 	}
 	// eco_mode must be untouched (not in profile).
 	device, okD := snap["device"].(map[string]any)
@@ -1737,7 +1738,7 @@ func TestEnforceSysAllNewLeaves(t *testing.T) {
 			Timezone:     strPtr("Europe/London"),
 			Latitude:     strPtr("51.5074"),
 			Longitude:    strPtr("-0.1278"),
-			SNTPServer:   strPtr("time.cloudflare.com"),
+			SNTPServer:   strPtr(sntpCloudflare),
 		},
 	})
 
@@ -1764,8 +1765,8 @@ func TestEnforceSysAllNewLeaves(t *testing.T) {
 	if location["lon"] != -0.1278 {
 		t.Errorf("lon = %v, want -0.1278", location["lon"])
 	}
-	if sntp["server"] != "time.cloudflare.com" {
-		t.Errorf("sntp.server = %v, want time.cloudflare.com", sntp["server"])
+	if sntp["server"] != sntpCloudflare {
+		t.Errorf("sntp.server = %v, want %s", sntp["server"], sntpCloudflare)
 	}
 
 	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
@@ -1927,5 +1928,149 @@ func TestEnforceWifiAPRoamDoesNotInterfereWithStaAppliedLogic(t *testing.T) {
 	ap, _ := wifiSnap["ap"].(map[string]any)
 	if ap["enable"] != false {
 		t.Errorf("wifi.ap.enable = %v, want false (enforced)", ap["enable"])
+	}
+}
+
+// ---- Feature: WS (outbound WebSocket) section envtests -----------------------
+
+func TestEnforceWSEnable(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devws1", MAC: "AABBCCDDE020", Gen: 2, InitialConfig: map[string]map[string]any{
+		"ws": {"enable": true},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDE020", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		WS: &shellyv1alpha1.WSSection{Enable: boolPtr(false)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccdde020")
+
+	if got := fake.ConfigSnapshot()["ws"]["enable"]; got != false {
+		t.Errorf("device ws.enable = %v, want false (enforced)", got)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after WS enforce = %+v, want True", cond)
+	}
+	sawWSSet := false
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "WS.SetConfig" {
+			sawWSSet = true
+		}
+	}
+	if !sawWSSet {
+		t.Error("expected WS.SetConfig call")
+	}
+}
+
+func TestEnforceWSAlreadyInSync(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devws2", MAC: "AABBCCDDE021", Gen: 2, InitialConfig: map[string]map[string]any{
+		"ws": {"enable": false},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDE021", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		WS: &shellyv1alpha1.WSSection{Enable: boolPtr(false)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccdde021")
+
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("in-sync ws should report True, got %+v", cond)
+	}
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "WS.SetConfig" {
+			t.Errorf("in-sync ws must not receive WS.SetConfig, saw %s", call.Method)
+		}
+	}
+}
+
+// ---- Feature: sys.debug.level envtests ---------------------------------------
+
+func TestEnforceSysDebugLevel(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devdbg1", MAC: "AABBCCDDE030", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {
+			"device": map[string]any{"eco_mode": false},
+			"debug":  map[string]any{"level": float64(3)},
+		},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDE030", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{DebugLevel: ptrInt32(0)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccdde030")
+
+	snap := fake.ConfigSnapshot()["sys"]
+	debug, ok := snap["debug"].(map[string]any)
+	if !ok || debug["level"] != float64(0) {
+		t.Errorf("sys.debug.level = %v, want 0 (enforced)", snap["debug"])
+	}
+	// eco_mode (device sub-map) must be untouched.
+	device, okD := snap["device"].(map[string]any)
+	if !okD || device["eco_mode"] != false {
+		t.Errorf("sys.device.eco_mode should be untouched, got %#v", snap["device"])
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after debug.level enforce = %+v, want True", cond)
+	}
+	sawSysSet := false
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == rpcSysSetConfig {
+			sawSysSet = true
+		}
+	}
+	if !sawSysSet {
+		t.Error("expected Sys.SetConfig call for debug.level")
+	}
+}
+
+func TestEnforceSysDebugLevelDoesNotClobberSntp(t *testing.T) {
+	// DebugLevel and SNTPServer both drifted: Sys.SetConfig must carry both
+	// sub-maps; the device's deep-merge preserves the other sub-maps.
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "devdbg2", MAC: "AABBCCDDE031", Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {
+			"debug": map[string]any{"level": float64(3)},
+			"sntp":  map[string]any{"server": "pool.ntp.org"},
+		},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDE031", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{
+			DebugLevel: ptrInt32(0),
+			SNTPServer: strPtr(sntpCloudflare),
+		},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccdde031")
+
+	snap := fake.ConfigSnapshot()["sys"]
+	debug, okG := snap["debug"].(map[string]any)
+	sntp, okS := snap["sntp"].(map[string]any)
+	if !okG || debug["level"] != float64(0) {
+		t.Errorf("sys.debug.level = %v, want 0", snap["debug"])
+	}
+	if !okS || sntp["server"] != sntpCloudflare {
+		t.Errorf("sys.sntp.server = %v, want %s", snap["sntp"], sntpCloudflare)
+	}
+	cond := meta.FindStatusCondition(dev.Status.Conditions, shellyv1alpha1.ConditionInSync)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Fatalf("condition after debug+sntp enforce = %+v, want True", cond)
 	}
 }

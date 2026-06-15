@@ -213,7 +213,7 @@ func main() {
 	// on every scrape using the manager's cached client (started alongside the
 	// manager). This avoids stale series on device deletion and per-reconcile churn.
 	ctrlmetrics.Registry.MustRegister(
-		metrics.NewDeviceCollector(mgr.GetClient(), deviceNamespace),
+		metrics.NewDeviceCollector(mgr.GetClient(), deviceNamespace, registryName),
 	)
 
 	// +kubebuilder:scaffold:builder

@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
+	"github.com/LukeEvansTech/shelly-operator/internal/fleet"
 )
 
 // Metric descriptions shared across all Collect calls (created once).
@@ -33,19 +34,19 @@ var (
 	descOnline = prometheus.NewDesc(
 		"shelly_device_online",
 		"1 if the device is online (answers discovery sweeps), 0 otherwise",
-		[]string{"mac", "name"}, nil,
+		[]string{"mac", "name", "room", "appliance"}, nil,
 	)
 
 	descInSync = prometheus.NewDesc(
 		"shelly_device_in_sync",
 		"1 if the device InSync condition is True, 0 otherwise",
-		[]string{"mac", "name"}, nil,
+		[]string{"mac", "name", "room", "appliance"}, nil,
 	)
 
 	descUpdateAvailable = prometheus.NewDesc(
 		"shelly_device_update_available",
 		"1 if a firmware update is available for the device, 0 otherwise",
-		[]string{"mac", "name"}, nil,
+		[]string{"mac", "name", "room", "appliance"}, nil,
 	)
 )
 
@@ -54,14 +55,17 @@ var (
 // than per-reconcile gauge.Set calls) avoids stale series when devices are
 // deleted and eliminates per-reconcile metric churn.
 type DeviceCollector struct {
-	reader    client.Reader
-	namespace string
+	reader       client.Reader
+	namespace    string
+	registryName string
 }
 
 // NewDeviceCollector returns a DeviceCollector that lists devices from reader
-// restricted to namespace.
-func NewDeviceCollector(reader client.Reader, namespace string) *DeviceCollector {
-	return &DeviceCollector{reader: reader, namespace: namespace}
+// restricted to namespace. registryName is the device-registry ConfigMap used
+// to resolve the friendly name/room/appliance labels ("" disables registry
+// resolution, leaving name to the on-device name / MAC fallback).
+func NewDeviceCollector(reader client.Reader, namespace, registryName string) *DeviceCollector {
+	return &DeviceCollector{reader: reader, namespace: namespace, registryName: registryName}
 }
 
 // Describe implements prometheus.Collector. It sends the descriptors for all
@@ -82,34 +86,58 @@ func (c *DeviceCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	ctx := context.Background()
 	for i := range list.Items {
 		dev := &list.Items[i]
-		mac, name := labelValues(dev)
+		mac, name, room, appliance := c.labelValues(ctx, dev)
 
 		ch <- prometheus.MustNewConstMetric(descOnline, prometheus.GaugeValue,
-			boolToFloat(dev.Status.Online), mac, name)
+			boolToFloat(dev.Status.Online), mac, name, room, appliance)
 
 		ch <- prometheus.MustNewConstMetric(descInSync, prometheus.GaugeValue,
-			inSyncValue(dev.Status.Conditions), mac, name)
+			inSyncValue(dev.Status.Conditions), mac, name, room, appliance)
 
 		ch <- prometheus.MustNewConstMetric(descUpdateAvailable, prometheus.GaugeValue,
-			boolToFloat(dev.Status.AvailableFirmware != ""), mac, name)
+			boolToFloat(dev.Status.AvailableFirmware != ""), mac, name, room, appliance)
 	}
 }
 
-// labelValues returns the mac and name label values for a device.
-// mac: status.MAC if set, otherwise the object name (lowercased MAC).
-// name: status.DeviceName if set, otherwise the object name.
-func labelValues(dev *shellyv1alpha1.ShellyDevice) (mac, name string) {
+// labelValues returns the mac, name, room and appliance label values for a
+// device.
+//
+//	mac:       status.MAC if set, otherwise the object name (lowercased MAC).
+//	name:      spec.displayName, else the registry name, else the on-device
+//	           name (status.DeviceName), else the object name. Resolving from
+//	           the registry means offline/never-named devices still get a
+//	           friendly name -- which is exactly when alerts need it.
+//	room:      the registry entry's room (unsanitized, e.g. "Master Bedroom").
+//	appliance: the registry entry's type (e.g. "sonos"). Both "" when unset.
+//
+// A registry read error degrades gracefully to the empty entry (name falls
+// back to the on-device name / MAC) rather than failing the scrape.
+func (c *DeviceCollector) labelValues(ctx context.Context, dev *shellyv1alpha1.ShellyDevice) (mac, name, room, appliance string) {
 	mac = dev.Status.MAC
 	if mac == "" {
 		mac = dev.Name
 	}
-	name = dev.Status.DeviceName
+
+	entry, err := fleet.ResolveRegistry(ctx, c.reader, dev, c.registryName)
+	if err != nil {
+		entry = fleet.RegistryEntry{}
+	}
+
+	name = dev.Spec.DisplayName
+	if name == "" {
+		name = entry.Name
+	}
+	if name == "" {
+		name = dev.Status.DeviceName
+	}
 	if name == "" {
 		name = dev.Name
 	}
-	return mac, name
+
+	return mac, name, entry.Room, entry.Type
 }
 
 // inSyncValue returns 1 if the InSync condition is True, 0 for all other

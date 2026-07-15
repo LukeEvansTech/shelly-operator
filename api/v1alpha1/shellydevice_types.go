@@ -71,7 +71,9 @@ type ShellyDeviceStatus struct {
 	// AvailableFirmware is the stable firmware version the device
 	// reports as available to install (from Sys.GetStatus
 	// available_updates), empty when the device is current. Beta
-	// releases are ignored. Refreshed by the discovery sweeper.
+	// releases are ignored. Refreshed by the device controller, which
+	// holds the profile's password: Sys.GetStatus needs credentials on
+	// an auth-enabled device, so the discovery sweeper cannot read it.
 	// +optional
 	AvailableFirmware string `json:"availableFirmware,omitempty"`
 

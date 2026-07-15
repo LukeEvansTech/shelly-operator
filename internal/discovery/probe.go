@@ -13,15 +13,18 @@ import (
 const defaultProbeConcurrency = 32
 
 // Found is one device that answered a probe during a sweep.
+//
+// Probing is deliberately unauthenticated: it uses only Shelly.GetDeviceInfo,
+// which needs no credentials. Pending-firmware visibility
+// (status.availableFirmware) is NOT collected here -- Sys.GetStatus goes
+// through POST /rpc and the sweeper holds no password, so on an auth-enabled
+// device it could only 401. On firmware 2.0.0 each such 401 mints a nonce
+// into a 32-entry circular buffer that the sweeper cannot use; once the
+// buffer saturates the device throttles everyone with HTTP 429. The
+// reconciler resolves the profile's password and reads it there instead.
 type Found struct {
 	Host string // host[:port] the device answered at
 	Info *shelly.DeviceInfo
-
-	// AvailableFirmware is the pending stable firmware version from
-	// Sys.GetStatus ("" = device is current). nil when the status read
-	// failed (e.g. auth-enabled device; the sweeper has no credentials)
-	// -- the upsert then keeps the previously recorded value.
-	AvailableFirmware *string
 }
 
 // probeAll probes every target with bounded concurrency and returns the
@@ -54,16 +57,6 @@ func probeAll(ctx context.Context, hc *http.Client, targets []string, concurrenc
 				return // unreachable, not a Shelly, or unsupported Gen1; skip
 			}
 			f := Found{Host: target, Info: info}
-			// Best-effort second read: pending-update visibility. Failure
-			// (auth-enabled device, flaky link) leaves the field nil so the
-			// upsert keeps the previous value. Beta releases are ignored.
-			if st, serr := shelly.NewClient(target, shelly.WithHTTPClient(hc)).GetSysStatus(ctx); serr == nil {
-				v := ""
-				if st.AvailableUpdates.Stable != nil {
-					v = st.AvailableUpdates.Stable.Version
-				}
-				f.AvailableFirmware = &v
-			}
 			mu.Lock()
 			found = append(found, f)
 			mu.Unlock()

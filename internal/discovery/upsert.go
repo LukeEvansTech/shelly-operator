@@ -65,9 +65,6 @@ func applyDevice(ctx context.Context, c client.Client, namespace string, now tim
 	dev.Status.DeviceName = f.Info.Name
 	dev.Status.Online = true
 	dev.Status.LastSeen = &metav1.Time{Time: now}
-	if f.AvailableFirmware != nil {
-		dev.Status.AvailableFirmware = *f.AvailableFirmware
-	}
 	if err := c.Status().Update(ctx, &dev); err != nil {
 		if apierrors.IsConflict(err) {
 			// Stale resourceVersion: another writer (the device controller,

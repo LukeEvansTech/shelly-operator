@@ -2121,3 +2121,44 @@ func TestReconcileReusesDigestNonceAcrossReconciles(t *testing.T) {
 			"exhausts firmware 2.0.0's nonce buffer and triggers HTTP 429)", got)
 	}
 }
+
+// TestReconcileStampsAvailableFirmwareOnAuthedDevice pins pending-firmware
+// visibility on an auth-enabled device. Sys.GetStatus goes through POST /rpc
+// and so needs credentials; the discovery sweeper has none, so its
+// unauthenticated read could only ever 401 -- minting a nonce it could not
+// use and leaving status.availableFirmware empty forever (which pinned
+// shelly_device_update_available at 0 and made ShellyDevicePendingFirmware
+// undeployable in practice). The reconciler holds the resolved password and
+// a cached client, so it refreshes the field on the nonce it already has.
+func TestReconcileStampsAvailableFirmwareOnAuthedDevice(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev41", MAC: "AABBCCDDEE41", Gen: 2, Password: "hunter2",
+		InitialConfig: map[string]map[string]any{
+			"sys": {"device": map[string]any{"eco_mode": true}},
+		},
+		AvailableUpdates: map[string]any{"stable": map[string]any{"version": "2.0.0"}},
+	}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	dev := createDevice(t, ns, "AABBCCDDEE41", hostOf(srv.URL), true, false, "")
+	dev.Status.AuthEnabled = true
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	createPasswordSecret(t, ns, "hunter2")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(true),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	got := reconcile(t, r, ns, "aabbccddee41")
+
+	if got.Status.AvailableFirmware != "2.0.0" {
+		t.Errorf("availableFirmware = %q, want %q (the reconciler must read Sys.GetStatus "+
+			"with the resolved password; the sweeper cannot)", got.Status.AvailableFirmware, "2.0.0")
+	}
+}

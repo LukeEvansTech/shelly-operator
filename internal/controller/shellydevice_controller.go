@@ -160,6 +160,12 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, reason, msg, nil, profile.Name)
 	}
 
+	// Pending-firmware visibility, taken on the client (and nonce) we already
+	// hold. The discovery sweeper cannot do this: Sys.GetStatus goes through
+	// POST /rpc and it has no credentials, so on an auth-enabled device its
+	// read could only 401.
+	r.stampAvailableFirmware(ctx, c, &dev)
+
 	desired := drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err := drift.Diff(desired, actual)
 	if err != nil {
@@ -417,6 +423,32 @@ func (r *ShellyDeviceReconciler) deviceClient(addr, password string) *shelly.Cli
 	}
 	r.clients[addr] = e
 	return e.client
+}
+
+// stampAvailableFirmware refreshes status.availableFirmware from the
+// device's Sys.GetStatus available_updates (stable only; beta is ignored).
+// It is best-effort: a failed read keeps the previously recorded value, and
+// it writes only when the value actually changed, so a steady-state fleet
+// costs no extra API traffic. Called with the reconcile's authenticated
+// client so it rides the nonce already in hand.
+func (r *ShellyDeviceReconciler) stampAvailableFirmware(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) {
+	st, err := c.GetSysStatus(ctx)
+	if err != nil {
+		return
+	}
+	want := ""
+	if st.AvailableUpdates.Stable != nil {
+		want = st.AvailableUpdates.Stable.Version
+	}
+	if dev.Status.AvailableFirmware == want {
+		return
+	}
+	base := dev.DeepCopy()
+	dev.Status.AvailableFirmware = want
+	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err != nil {
+		// Best-effort: keep the object consistent and retry next reconcile.
+		dev.Status.AvailableFirmware = base.Status.AvailableFirmware
+	}
 }
 
 // withWarnings appends non-fatal warnings to a condition message.

@@ -40,13 +40,6 @@ func TestProbeAll(t *testing.T) {
 	if macs["AABBCCDDEE01"] != hostOf(srv1.URL) || macs["AABBCCDDEE02"] != hostOf(srv2.URL) {
 		t.Errorf("unexpected hosts: %v", macs)
 	}
-	// Devices with no available updates must carry a pointer to empty string
-	// (Sys.GetStatus succeeded, stable update field absent => current firmware).
-	for _, f := range found {
-		if f.AvailableFirmware == nil || *f.AvailableFirmware != "" {
-			t.Errorf("device with no updates: AvailableFirmware = %v, want pointer to empty string", f.AvailableFirmware)
-		}
-	}
 }
 
 func TestProbeAllCancelled(t *testing.T) {
@@ -55,5 +48,32 @@ func TestProbeAllCancelled(t *testing.T) {
 	hc := &http.Client{Timeout: 5 * time.Second}
 	if found := probeAll(ctx, hc, []string{"127.0.0.1:1", "127.0.0.1:2"}, 2); len(found) != 0 {
 		t.Errorf("expected no results after cancel, got %+v", found)
+	}
+}
+
+// TestProbeAllDoesNotChallengeAuthedDevice pins that a sweep costs an
+// auth-enabled device no nonce. The sweeper holds no credentials, so any
+// call it makes through POST /rpc can only 401 -- and on firmware 2.0.0 a
+// 401 mints a nonce into a 32-entry circular buffer that the sweeper then
+// throws away. Every 5m sweep across the fleet burned a slot for nothing
+// and, once the buffer saturated, the device answered 429 to everyone
+// (including the reconciler). Probing must stay on the unauthenticated
+// Shelly.GetDeviceInfo endpoint; availableFirmware is the reconciler's job,
+// as it is the only component holding the password.
+func TestProbeAllDoesNotChallengeAuthedDevice(t *testing.T) {
+	d := &shellytest.Device{ID: "dev3", MAC: "AABBCCDDEE03", Model: "SNPL-00112UK",
+		App: "PlusPlugUK", Gen: 2, Password: "hunter2"}
+	srv := shellytest.New(d)
+	defer srv.Close()
+
+	hc := &http.Client{Timeout: 5 * time.Second}
+	found := probeAll(context.Background(), hc, []string{hostOf(srv.URL)}, 1)
+
+	if len(found) != 1 {
+		t.Fatalf("found %d devices, want 1 (probe must work unauthenticated)", len(found))
+	}
+	if got := d.Challenges(); got != 0 {
+		t.Errorf("sweep issued %d digest challenges, want 0 (each mints a nonce the "+
+			"sweeper cannot use and cannot reuse, exhausting firmware 2.0.0's buffer)", got)
 	}
 }

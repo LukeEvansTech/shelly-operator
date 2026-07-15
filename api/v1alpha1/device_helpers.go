@@ -19,6 +19,21 @@ const (
 	AnnotationNote = "shelly.thirdimpact.io/note"
 )
 
+// LabelRegistryPrefix namespaces the registry's free-form labels map.
+//
+// room/appliance are semantic (where a device is, what it is) and a device
+// gets exactly one of each, so a policy axis cannot ride on them without
+// destroying the semantics -- a dishwasher is both "kitchen" and "must power
+// back on after an outage". Custom labels give ShellyProfile selectors an
+// independent axis for that.
+//
+// The distinct prefix is load-bearing: it lets stamping compute removals by
+// prefix (a label the registry stops declaring must disappear, or a retired
+// policy would keep selecting the device forever) without that sweep touching
+// the operator's own shelly.thirdimpact.io/ labels -- app/model/gen come from
+// discovery, and deleting those would break every selector.
+const LabelRegistryPrefix = "registry.shelly.thirdimpact.io/"
+
 // DeviceObjectName derives the ShellyDevice object name from a device MAC:
 // lowercase hex with separators stripped, e.g. "3C:8A:1F:EC:8E:3C" ->
 // "3c8a1fec8e3c".

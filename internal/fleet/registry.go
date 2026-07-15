@@ -20,6 +20,12 @@ type RegistryEntry struct {
 	Room string `json:"room"`
 	Type string `json:"type"`
 	Note string `json:"note"`
+
+	// Labels are free-form policy labels, stamped onto the device under
+	// LabelRegistryPrefix so ShellyProfile selectors can match on an axis
+	// independent of room/type. Keys are used verbatim (invalid ones are
+	// skipped); values are sanitized like room/type.
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // ResolveRegistry looks up dev.Name in the registry ConfigMap and returns the

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -66,6 +67,19 @@ type ShellyDeviceReconciler struct {
 
 	// Interval is the steady-state requeue (jittered, +/-10%); default 5m.
 	Interval time.Duration
+
+	// clientMu guards clients.
+	clientMu sync.Mutex
+	// clients caches one RPC client per device address so its digest nonce
+	// survives across reconciles. See deviceClient.
+	clients map[string]*deviceClientEntry
+}
+
+// deviceClientEntry is a cached RPC client plus the password it was built
+// with, so a rotated password rebuilds it.
+type deviceClientEntry struct {
+	password string
+	client   *shelly.Client
 }
 
 // Reconcile checks one device for drift against its matched profile.
@@ -378,12 +392,31 @@ func (r *ShellyDeviceReconciler) rpcHTTPClient() *http.Client {
 
 // deviceClient builds an RPC client for the device, authenticated when a
 // password is available.
+// deviceClient returns the cached RPC client for addr, building one on first
+// use. The client is cached rather than rebuilt per reconcile so its digest
+// challenge -- and therefore its nonce -- is reused: firmware 2.0.0 keeps
+// only a 32-entry circular nonce buffer and answers new-nonce requests with
+// HTTP 429 while that buffer is exhausted, whereas one nonce serves ~30k
+// requests or 1h (nc is incremented per request, see internal/shelly/digest).
+// A rotated password rebuilds the entry. A stale entry left behind by an
+// address change is harmless: the device answering at that address issues a
+// 401 and the client re-challenges.
 func (r *ShellyDeviceReconciler) deviceClient(addr, password string) *shelly.Client {
+	r.clientMu.Lock()
+	defer r.clientMu.Unlock()
+	if e, ok := r.clients[addr]; ok && e.password == password {
+		return e.client
+	}
 	opts := []shelly.Option{shelly.WithHTTPClient(r.HTTP)}
 	if password != "" {
 		opts = append(opts, shelly.WithPassword(password))
 	}
-	return shelly.NewClient(addr, opts...)
+	e := &deviceClientEntry{password: password, client: shelly.NewClient(addr, opts...)}
+	if r.clients == nil {
+		r.clients = map[string]*deviceClientEntry{}
+	}
+	r.clients[addr] = e
+	return e.client
 }
 
 // withWarnings appends non-fatal warnings to a condition message.

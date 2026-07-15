@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -425,6 +426,24 @@ func (r *ShellyDeviceReconciler) deviceClient(addr, password string) *shelly.Cli
 	return e.client
 }
 
+// registryOwnedLabels lists the label keys on dev that the registry owns and
+// may therefore delete when it stops declaring them: the two fixed semantic
+// keys, plus anything under LabelRegistryPrefix.
+//
+// It deliberately never returns a discovery label (app/model/gen). Those share
+// the shelly.thirdimpact.io/ namespace with room/appliance, so a prefix sweep
+// over that namespace would delete them and break every profile selector --
+// which is why the free-form labels get their own prefix.
+func registryOwnedLabels(dev *shellyv1alpha1.ShellyDevice) []string {
+	owned := []string{shellyv1alpha1.LabelRoom, shellyv1alpha1.LabelAppliance}
+	for k := range dev.Labels {
+		if strings.HasPrefix(k, shellyv1alpha1.LabelRegistryPrefix) {
+			owned = append(owned, k)
+		}
+	}
+	return owned
+}
+
 // stampAvailableFirmware refreshes status.availableFirmware from the
 // device's Sys.GetStatus available_updates (stable only; beta is ignored).
 // It is best-effort: a failed read keeps the previously recorded value, and
@@ -486,6 +505,15 @@ func (r *ShellyDeviceReconciler) stampRegistry(ctx context.Context, dev *shellyv
 	if entry.Type != "" {
 		want[shellyv1alpha1.LabelAppliance] = fleet.SanitizeLabel(entry.Type)
 	}
+	for k, v := range entry.Labels {
+		key := shellyv1alpha1.LabelRegistryPrefix + k
+		// A malformed key would make every Patch fail and wedge the device,
+		// so skip it rather than take the whole reconcile down for a typo.
+		if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+			continue
+		}
+		want[key] = fleet.SanitizeLabel(v)
+	}
 
 	wantAnnotations := map[string]string{}
 	if entry.Note != "" {
@@ -500,14 +528,18 @@ func (r *ShellyDeviceReconciler) stampRegistry(ctx context.Context, dev *shellyv
 			break
 		}
 	}
-	// Check for labels that should be removed (registry cleared them).
+	// Check for labels that should be removed (registry cleared them). The
+	// existence check matters: registryOwnedLabels always offers room and
+	// appliance, so without it a device the registry never labelled would
+	// look "changed" on every reconcile and be patched forever.
 	if !changed {
-		for _, k := range []string{shellyv1alpha1.LabelRoom, shellyv1alpha1.LabelAppliance} {
-			if _, inWant := want[k]; !inWant {
-				if _, exists := dev.Labels[k]; exists {
-					changed = true
-					break
-				}
+		for _, k := range registryOwnedLabels(dev) {
+			if _, inWant := want[k]; inWant {
+				continue
+			}
+			if _, exists := dev.Labels[k]; exists {
+				changed = true
+				break
 			}
 		}
 	}
@@ -539,7 +571,7 @@ func (r *ShellyDeviceReconciler) stampRegistry(ctx context.Context, dev *shellyv
 	}
 	maps.Copy(dev.Labels, want)
 	// Remove labels the registry no longer provides.
-	for _, k := range []string{shellyv1alpha1.LabelRoom, shellyv1alpha1.LabelAppliance} {
+	for _, k := range registryOwnedLabels(dev) {
 		if _, inWant := want[k]; !inWant {
 			delete(dev.Labels, k)
 		}

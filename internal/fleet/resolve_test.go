@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestResolveNameRegistryFallsBackToMap(t *testing.T) {
 // TestResolveRegistryMissingConfigMap: absent ConfigMap -> zero entry, no error.
 func TestResolveRegistryMissingConfigMap(t *testing.T) {
 	entry, err := ResolveRegistry(context.Background(), stubReader{}, dev(""), "shelly-registry")
-	if err != nil || entry != (RegistryEntry{}) {
+	if err != nil || !reflect.DeepEqual(entry, RegistryEntry{}) {
 		t.Errorf("got %+v, %v; want zero, nil", entry, err)
 	}
 }
@@ -168,7 +169,7 @@ func TestResolveRegistryPartialJSON(t *testing.T) {
 func TestResolveRegistryDisabled(t *testing.T) {
 	r := stubReader{err: fmt.Errorf("must not be called")}
 	entry, err := ResolveRegistry(context.Background(), r, dev(""), "")
-	if err != nil || entry != (RegistryEntry{}) {
+	if err != nil || !reflect.DeepEqual(entry, RegistryEntry{}) {
 		t.Errorf("got %+v, %v; want zero, nil", entry, err)
 	}
 }
@@ -179,7 +180,7 @@ func TestResolveRegistryMissingEntry(t *testing.T) {
 		"shelly-registry": {Data: map[string]string{"other-mac": `{"room":"Den"}`}},
 	}}
 	entry, err := ResolveRegistry(context.Background(), r, dev(""), "shelly-registry")
-	if err != nil || entry != (RegistryEntry{}) {
+	if err != nil || !reflect.DeepEqual(entry, RegistryEntry{}) {
 		t.Errorf("got %+v, %v; want zero, nil", entry, err)
 	}
 }

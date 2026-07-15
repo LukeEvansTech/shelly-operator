@@ -219,3 +219,94 @@ func TestRegistryNoSpuriousRewrite(t *testing.T) {
 			first.Labels[shellyv1alpha1.LabelRoom], second.Labels[shellyv1alpha1.LabelRoom])
 	}
 }
+
+// TestRegistryStampsCustomLabels covers the registry's custom labels map.
+// room/type are semantic (where a device is, what it is); policy is a
+// different axis -- a dishwasher is BOTH "kitchen" and "must power back on
+// after an outage" -- and a device has only one type, so policy cannot ride
+// on it without destroying the semantics. Custom labels give profiles a
+// selector that is independent of room/type. They are namespaced under
+// registry.shelly.thirdimpact.io/ so removal is computable by prefix without
+// touching the operator's own labels (app/model/gen from discovery, and
+// room/appliance).
+func TestRegistryStampsCustomLabels(t *testing.T) {
+	ns := newNamespace(t)
+	mac := "BBCCDDEEAA05"
+	fake := &shellytest.Device{ID: "reg05", MAC: mac, Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, mac, hostOf(srv.URL), true, false, "")
+	createRegistryCM(t, ns, map[string]string{
+		"bbccddeeaa05": `{"name":"Dishwasher","room":"Kitchen","type":"kitchen","labels":{"power-policy":"Always On"}}`,
+	})
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r := newRegistryReconciler()
+	got, err := reconcileRaw(t, r, ns, "bbccddeeaa05")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key := shellyv1alpha1.LabelRegistryPrefix + "power-policy"
+	if got.Labels[key] != "always-on" {
+		t.Errorf("custom label %s = %q, want always-on (value must be sanitized like room/type)", key, got.Labels[key])
+	}
+	// The semantic axis must survive: that is the whole point.
+	if got.Labels[shellyv1alpha1.LabelAppliance] != "kitchen" {
+		t.Errorf("appliance = %q, want kitchen (custom labels must not displace type)", got.Labels[shellyv1alpha1.LabelAppliance])
+	}
+	if got.Labels[shellyv1alpha1.LabelApp] == "" {
+		t.Error("discovery labels must not be clobbered")
+	}
+}
+
+// TestRegistryRemovesClearedCustomLabel verifies a custom label disappears
+// when the registry stops declaring it -- the same contract room/appliance
+// already have. Without prefix-scoped removal a retired policy label would
+// linger forever and keep selecting the device into a profile.
+func TestRegistryRemovesClearedCustomLabel(t *testing.T) {
+	ns := newNamespace(t)
+	mac := "BBCCDDEEAA06"
+	fake := &shellytest.Device{ID: "reg06", MAC: mac, Gen: 2, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, mac, hostOf(srv.URL), true, false, "")
+	cm := createRegistryCM(t, ns, map[string]string{
+		"bbccddeeaa06": `{"name":"PDU-01","room":"Garage","type":"rack","labels":{"power-policy":"infra"}}`,
+	})
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+	})
+
+	r := newRegistryReconciler()
+	key := shellyv1alpha1.LabelRegistryPrefix + "power-policy"
+	got, err := reconcileRaw(t, r, ns, "bbccddeeaa06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Labels[key] != "infra" {
+		t.Fatalf("precondition: custom label = %q, want infra", got.Labels[key])
+	}
+
+	// Registry drops the labels map entirely.
+	cm.Data["bbccddeeaa06"] = `{"name":"PDU-01","room":"Garage","type":"rack"}`
+	if err := k8sClient.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	got, err = reconcileRaw(t, r, ns, "bbccddeeaa06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := got.Labels[key]; exists {
+		t.Errorf("custom label %s still present after registry cleared it", key)
+	}
+	if got.Labels[shellyv1alpha1.LabelAppliance] != "rack" {
+		t.Errorf("appliance = %q, want rack (removal must be scoped to the custom prefix)", got.Labels[shellyv1alpha1.LabelAppliance])
+	}
+}

@@ -2074,3 +2074,50 @@ func TestEnforceSysDebugLevelDoesNotClobberSntp(t *testing.T) {
 		t.Fatalf("condition after debug+sntp enforce = %+v, want True", cond)
 	}
 }
+
+// TestReconcileReusesDigestNonceAcrossReconciles pins the fix for the
+// firmware 2.0.0 HTTP 429 storm. 2.0.0 keeps a 32-entry circular nonce
+// buffer; when it is exhausted the device opens a 2s throttle window and
+// answers new-nonce requests with 429 instead of 401. Building a fresh
+// shelly.Client per reconcile threw away the cached digest challenge and
+// forced a new nonce every cycle, so the operator sawed through the buffer
+// and reported spurious ConfigFetchFailed/Unknown (surfacing as bogus
+// "config drift" alerts). One nonce is good for ~30k requests or 1h, so the
+// client -- and its digest state -- must survive across reconciles.
+func TestReconcileReusesDigestNonceAcrossReconciles(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev40", MAC: "AABBCCDDEE40", Gen: 2, Password: "hunter2",
+		InitialConfig: map[string]map[string]any{
+			"sys": {"device": map[string]any{"eco_mode": true}},
+		}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	dev := createDevice(t, ns, "AABBCCDDEE40", hostOf(srv.URL), true, false, "")
+	dev.Status.AuthEnabled = true
+	if err := k8sClient.Status().Update(context.Background(), dev); err != nil {
+		t.Fatal(err)
+	}
+	createPasswordSecret(t, ns, "hunter2")
+	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		Auth: &shellyv1alpha1.AuthSection{
+			Enable:            boolPtr(true),
+			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
+		},
+	})
+
+	r, _ := newReconciler()
+	for i := 1; i <= 3; i++ {
+		got := reconcile(t, r, ns, "aabbccddee40")
+		cond := meta.FindStatusCondition(got.Status.Conditions, shellyv1alpha1.ConditionInSync)
+		if cond == nil || cond.Status != metav1.ConditionTrue {
+			t.Fatalf("reconcile %d: condition = %+v, want InSync=True", i, cond)
+		}
+	}
+
+	if got := fake.Challenges(); got != 1 {
+		t.Errorf("device issued %d digest challenges across 3 reconciles, want 1 "+
+			"(the cached nonce must be reused; a fresh challenge per reconcile "+
+			"exhausts firmware 2.0.0's nonce buffer and triggers HTTP 429)", got)
+	}
+}

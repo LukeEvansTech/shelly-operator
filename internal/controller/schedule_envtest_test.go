@@ -38,7 +38,7 @@ func scheduleCallSpec(method string, params any) shellyv1alpha1.ScheduleCallSpec
 // this same cron expression so a parameter would be unused (unparam).
 func nightlyOnSpec() shellyv1alpha1.ScheduleJobSpec {
 	return shellyv1alpha1.ScheduleJobSpec{
-		Enable:   boolPtr(true),
+		Enable:   new(true),
 		Timespec: "0 0 22 * * *",
 		Calls:    []shellyv1alpha1.ScheduleCallSpec{scheduleCallSpec("Switch.Set", map[string]any{"id": 0, "on": true})},
 	}
@@ -47,7 +47,7 @@ func nightlyOnSpec() shellyv1alpha1.ScheduleJobSpec {
 // morningOffSpec declares a Switch.Set job that turns switch off at 06:00.
 func morningOffSpec() shellyv1alpha1.ScheduleJobSpec {
 	return shellyv1alpha1.ScheduleJobSpec{
-		Enable:   boolPtr(true),
+		Enable:   new(true),
 		Timespec: "0 0 06 * * *",
 		Calls:    []shellyv1alpha1.ScheduleCallSpec{scheduleCallSpec("Switch.Set", map[string]any{"id": 0, "on": false})},
 	}
@@ -310,7 +310,7 @@ func TestScheduleEnforceFirmwareAndScheduleCoexist(t *testing.T) {
 
 	createDevice(t, ns, "AABBCCDDEE54", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: new(true)},
 		Schedules: &shellyv1alpha1.ScheduleSection{
 			Jobs: []shellyv1alpha1.ScheduleJobSpec{nightlyOnSpec()},
 		},
@@ -456,7 +456,7 @@ func TestScheduleNoSectionLeavesSchedulesAlone(t *testing.T) {
 
 	createDevice(t, ns, "AABBCCDDEE57", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Cloud: &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},
+		Cloud: &shellyv1alpha1.CloudSection{Enable: new(false)},
 	})
 
 	r, _ := newReconciler()
@@ -550,7 +550,7 @@ func TestScheduleEnforceMixedFirmwareAndCustom(t *testing.T) {
 
 	createDevice(t, ns, "AABBCCDDEE59", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Firmware:  &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+		Firmware:  &shellyv1alpha1.FirmwareSection{AutoUpdate: new(true)},
 		Schedules: &shellyv1alpha1.ScheduleSection{Jobs: nil},
 	})
 

@@ -9,8 +9,6 @@ import (
 	shellyv1alpha1 "github.com/LukeEvansTech/shelly-operator/api/v1alpha1"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 func rawConfig(t *testing.T, m map[string]any) map[string]json.RawMessage {
 	t.Helper()
 	out := map[string]json.RawMessage{}
@@ -26,11 +24,11 @@ func rawConfig(t *testing.T, m map[string]any) map[string]json.RawMessage {
 
 func TestRenderSections(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: ptr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 		Name:   &shellyv1alpha1.NameSection{Managed: true},
-		MQTT:   &shellyv1alpha1.MQTTSection{Enable: ptr(true), Server: "mqtt:1883"},
-		Cloud:  &shellyv1alpha1.CloudSection{Enable: ptr(false)},
-		Switch: &shellyv1alpha1.SwitchSection{InitialState: ptr("restore_last"), AutoOn: ptr(false), AutoOnDelay: ptr(int32(5)), AutoOff: ptr(true), AutoOffDelay: ptr(int32(300)), PowerLimit: ptr(int32(2300))},
+		MQTT:   &shellyv1alpha1.MQTTSection{Enable: new(true), Server: "mqtt:1883"},
+		Cloud:  &shellyv1alpha1.CloudSection{Enable: new(false)},
+		Switch: &shellyv1alpha1.SwitchSection{InitialState: new("restore_last"), AutoOn: new(false), AutoOnDelay: new(int32(5)), AutoOff: new(true), AutoOffDelay: new(int32(300)), PowerLimit: new(int32(2300))},
 	}
 	actual := rawConfig(t, map[string]any{
 		"sys":      map[string]any{},
@@ -109,9 +107,9 @@ func TestRenderNameUnmanagedWithoutName(t *testing.T) {
 
 func TestRenderWifi(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{Wifi: &shellyv1alpha1.WifiSection{
-		Sta: &shellyv1alpha1.WifiNetwork{Enable: ptr(true), SSID: "iot-new",
+		Sta: &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-new",
 			PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi", Key: "new"}},
-		Sta1: &shellyv1alpha1.WifiNetwork{Enable: ptr(true), SSID: "iot-old"},
+		Sta1: &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-old"},
 	}}
 	got := Render(cfg, "", nil)
 	want := map[string]any{
@@ -144,7 +142,7 @@ func TestRenderWifiEmptyAndNil(t *testing.T) {
 
 func TestRenderBLEEnable(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		BLE: &shellyv1alpha1.BLESection{Enable: ptr(true)},
+		BLE: &shellyv1alpha1.BLESection{Enable: new(true)},
 	}
 	got := Render(cfg, "", nil)
 	want := map[string]any{"enable": true}
@@ -163,7 +161,7 @@ func TestRenderBLENilUnmanaged(t *testing.T) {
 
 func TestRenderSysTimezone(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{Timezone: ptr("Europe/London")},
+		System: &shellyv1alpha1.SystemSection{Timezone: new("Europe/London")},
 	}
 	got := Render(cfg, "", nil)
 	wantSys := map[string]any{"location": map[string]any{"tz": "Europe/London"}}
@@ -176,8 +174,8 @@ func TestRenderSysBothEcoModeAndTimezone(t *testing.T) {
 	// Setting both must not drop either sub-object.
 	cfg := shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			EcoMode:  ptr(true),
-			Timezone: ptr("America/New_York"),
+			EcoMode:  new(true),
+			Timezone: new("America/New_York"),
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -195,7 +193,7 @@ func TestRenderSysBothEcoModeAndTimezone(t *testing.T) {
 func TestRenderSysTimezoneDoesNotClobberEcoMode(t *testing.T) {
 	// When only timezone is declared, the device sub-map must be absent.
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{Timezone: ptr("UTC")},
+		System: &shellyv1alpha1.SystemSection{Timezone: new("UTC")},
 	}
 	got := Render(cfg, "", nil)
 	sys := got["sys"]
@@ -207,7 +205,7 @@ func TestRenderSysTimezoneDoesNotClobberEcoMode(t *testing.T) {
 func TestRenderSysEcoModeDoesNotClobberTimezone(t *testing.T) {
 	// When only eco_mode is declared, the location sub-map must be absent.
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: ptr(false)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(false)},
 	}
 	got := Render(cfg, "", nil)
 	sys := got["sys"]
@@ -220,7 +218,7 @@ func TestRenderSysEcoModeDoesNotClobberTimezone(t *testing.T) {
 
 func TestRenderSysSNTPServer(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{SNTPServer: ptr("time.cloudflare.com")},
+		System: &shellyv1alpha1.SystemSection{SNTPServer: new("time.cloudflare.com")},
 	}
 	got := Render(cfg, "", nil)
 	sys := got["sys"]
@@ -242,7 +240,7 @@ func TestRenderSysSNTPServer(t *testing.T) {
 
 func TestRenderSysDiscoverable(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{Discoverable: ptr(false)},
+		System: &shellyv1alpha1.SystemSection{Discoverable: new(false)},
 	}
 	got := Render(cfg, "", nil)
 	sys := got["sys"]
@@ -266,8 +264,8 @@ func TestRenderSysDiscoverableDoesNotClobberEcoMode(t *testing.T) {
 	// Both eco_mode and discoverable must appear in device sub-map together.
 	cfg := shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			EcoMode:      ptr(true),
-			Discoverable: ptr(false),
+			EcoMode:      new(true),
+			Discoverable: new(false),
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -286,8 +284,8 @@ func TestRenderSysDiscoverableDoesNotClobberEcoMode(t *testing.T) {
 func TestRenderSysLatLon(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			Latitude:  ptr("51.5074"),
-			Longitude: ptr("-0.1278"),
+			Latitude:  new("51.5074"),
+			Longitude: new("-0.1278"),
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -309,9 +307,9 @@ func TestRenderSysLatLonDoesNotClobberTimezone(t *testing.T) {
 	// clobber the others.
 	cfg := shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			Timezone:  ptr("Europe/London"),
-			Latitude:  ptr("51.5074"),
-			Longitude: ptr("-0.1278"),
+			Timezone:  new("Europe/London"),
+			Latitude:  new("51.5074"),
+			Longitude: new("-0.1278"),
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -335,12 +333,12 @@ func TestRenderSysAllSubSectionsTogether(t *testing.T) {
 	// device, location, and sntp sub-maps must all be present and correct.
 	cfg := shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			EcoMode:      ptr(true),
-			Discoverable: ptr(false),
-			Timezone:     ptr("UTC"),
-			Latitude:     ptr("0"),
-			Longitude:    ptr("0"),
-			SNTPServer:   ptr("pool.ntp.org"),
+			EcoMode:      new(true),
+			Discoverable: new(false),
+			Timezone:     new("UTC"),
+			Latitude:     new("0"),
+			Longitude:    new("0"),
+			SNTPServer:   new("pool.ntp.org"),
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -394,7 +392,7 @@ func TestRenderSysNilUnmanagedNoSNTPOrLatLon(t *testing.T) {
 func TestRenderWifiAP(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			AP: &shellyv1alpha1.WifiAP{Enable: ptr(false)},
+			AP: &shellyv1alpha1.WifiAP{Enable: new(false)},
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -419,8 +417,8 @@ func TestRenderWifiAPRangeExtender(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
 			AP: &shellyv1alpha1.WifiAP{
-				Enable:        ptr(true),
-				RangeExtender: ptr(false),
+				Enable:        new(true),
+				RangeExtender: new(false),
 			},
 		},
 	}
@@ -445,8 +443,8 @@ func TestRenderWifiRoam(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
 			Roam: &shellyv1alpha1.WifiRoam{
-				RSSIThreshold: ptr(int32(-80)),
-				Interval:      ptr(int32(60)),
+				RSSIThreshold: new(int32(-80)),
+				Interval:      new(int32(60)),
 			},
 		},
 	}
@@ -471,9 +469,9 @@ func TestRenderWifiAPAndRoamTogetherWithSta(t *testing.T) {
 	// AP, Roam, and Sta all declared together -- all three must appear.
 	cfg := shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			Sta:  &shellyv1alpha1.WifiNetwork{Enable: ptr(true), SSID: "iot"},
-			AP:   &shellyv1alpha1.WifiAP{Enable: ptr(false)},
-			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: ptr(int32(-75))},
+			Sta:  &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot"},
+			AP:   &shellyv1alpha1.WifiAP{Enable: new(false)},
+			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: new(int32(-75))},
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -519,8 +517,8 @@ func TestRenderWifiAPRoamNoPasswords(t *testing.T) {
 	// Verify that AP and Roam renders contain no password-related keys.
 	cfg := shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			AP:   &shellyv1alpha1.WifiAP{Enable: ptr(true), RangeExtender: ptr(false)},
-			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: ptr(int32(-70)), Interval: ptr(int32(30))},
+			AP:   &shellyv1alpha1.WifiAP{Enable: new(true), RangeExtender: new(false)},
+			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: new(int32(-70)), Interval: new(int32(30))},
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -571,7 +569,7 @@ func relayActual(t *testing.T) map[string]json.RawMessage {
 
 func TestRenderUILEDMode(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		UI: &shellyv1alpha1.UISection{LEDMode: ptr("switch")},
+		UI: &shellyv1alpha1.UISection{LEDMode: new("switch")},
 	}
 	got := Render(cfg, "", plugActual(t))
 	ui, ok := got["pluguk_ui"]
@@ -597,13 +595,13 @@ func TestRenderUILEDMode(t *testing.T) {
 func TestRenderUIFullSection(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
 		UI: &shellyv1alpha1.UISection{
-			LEDMode: ptr("off"),
+			LEDMode: new("off"),
 			NightMode: &shellyv1alpha1.NightMode{
-				Enable:        ptr(true),
-				Brightness:    ptr(int32(30)),
+				Enable:        new(true),
+				Brightness:    new(int32(30)),
 				ActiveBetween: []string{"23:00", "06:30"},
 			},
-			ButtonInMode: ptr("detached"),
+			ButtonInMode: new("detached"),
 		},
 	}
 	got := Render(cfg, "", plugActual(t))
@@ -687,7 +685,7 @@ func TestRenderUINoFalseDriftActiveBetween(t *testing.T) {
 func TestRenderUIOnlyNightMode(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
 		UI: &shellyv1alpha1.UISection{
-			NightMode: &shellyv1alpha1.NightMode{Enable: ptr(false)},
+			NightMode: &shellyv1alpha1.NightMode{Enable: new(false)},
 		},
 	}
 	got := Render(cfg, "", plugActual(t))
@@ -712,7 +710,7 @@ func TestRenderUIRelayDeviceNoOp(t *testing.T) {
 	// Relay device has no *_ui key -- UI section must produce nothing.
 	cfg := shellyv1alpha1.ProfileConfig{
 		UI: &shellyv1alpha1.UISection{
-			LEDMode: ptr("power"),
+			LEDMode: new("power"),
 		},
 	}
 	got := Render(cfg, "", relayActual(t))
@@ -745,7 +743,7 @@ func keys(m map[string]map[string]any) []string {
 
 func TestRenderWSEnable(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		WS: &shellyv1alpha1.WSSection{Enable: ptr(false)},
+		WS: &shellyv1alpha1.WSSection{Enable: new(false)},
 	}
 	got := Render(cfg, "", nil)
 	want := map[string]any{"enable": false}
@@ -766,7 +764,7 @@ func TestRenderWSNilUnmanaged(t *testing.T) {
 
 func TestRenderSysDebugLevel(t *testing.T) {
 	cfg := shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{DebugLevel: ptr(int32(0))},
+		System: &shellyv1alpha1.SystemSection{DebugLevel: new(int32(0))},
 	}
 	got := Render(cfg, "", nil)
 	sys := got["sys"]
@@ -794,10 +792,10 @@ func TestRenderSysDebugLevelDoesNotClobberOtherSubMaps(t *testing.T) {
 	// must be present and correct.
 	cfg := shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			EcoMode:    ptr(true),
-			Timezone:   ptr("UTC"),
-			SNTPServer: ptr("time.cloudflare.com"),
-			DebugLevel: ptr(int32(2)),
+			EcoMode:    new(true),
+			Timezone:   new("UTC"),
+			SNTPServer: new("time.cloudflare.com"),
+			DebugLevel: new(int32(2)),
 		},
 	}
 	got := Render(cfg, "", nil)
@@ -824,7 +822,7 @@ func TestRenderSysDebugLevelDoesNotClobberOtherSubMaps(t *testing.T) {
 
 func TestRenderSysDebugLevelNilUnmanaged(t *testing.T) {
 	// DebugLevel nil must not produce a debug sub-map.
-	cfg := shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: ptr(false)}}
+	cfg := shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: new(false)}}
 	got := Render(cfg, "", nil)
 	sys := got["sys"]
 	if _, has := sys["debug"]; has {

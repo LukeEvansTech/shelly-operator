@@ -128,8 +128,8 @@ func TestJobSpecMatchesDevice_ParamsOrderInsensitive(t *testing.T) {
 func TestJobSpecMatchesDevice_EnableIgnoredInContentMatch(t *testing.T) {
 	// enable differs but content (timespec+calls) matches -> still a match.
 	// (enable mismatch produces an "update" action, not a "create+delete" pair)
-	spec := switchSetSpec("@sunset", boolPtr(false), true) // want disabled
-	job := switchSetJob(1, "@sunset")                      // currently enabled
+	spec := switchSetSpec("@sunset", new(false), true) // want disabled
+	job := switchSetJob(1, "@sunset")                  // currently enabled
 	if !jobSpecMatchesDevice(job, spec) {
 		t.Error("enable difference must not affect content match")
 	}
@@ -163,7 +163,7 @@ func TestScheduleActionsNilSection(t *testing.T) {
 
 func TestScheduleActionsIdempotent(t *testing.T) {
 	// Re-applying an unchanged declared set must produce ZERO actions.
-	spec := switchSetSpec("0 0 22 * * *", boolPtr(true), false)
+	spec := switchSetSpec("0 0 22 * * *", new(true), false)
 	job := shelly.ScheduleJob{
 		ID:       1,
 		Enable:   true,
@@ -198,7 +198,7 @@ func TestScheduleActionsDeletesUndeclaredJob(t *testing.T) {
 
 func TestScheduleActionsUpdateEnable(t *testing.T) {
 	// Job exists on device (enabled) but profile wants it disabled.
-	spec := switchSetSpec("@sunset", boolPtr(false), true)
+	spec := switchSetSpec("@sunset", new(false), true)
 	job := switchSetJob(1, "@sunset") // enabled on device
 	actions := scheduleActions(newSection(spec), []shelly.ScheduleJob{job})
 	if len(actions) != 1 || actions[0].kind != actionUpdate {
@@ -248,7 +248,7 @@ func TestScheduleActionsIgnoresFirmwareJobs(t *testing.T) {
 func TestScheduleActionsMultipleJobs(t *testing.T) {
 	// Device has: firmware job (must be preserved), one matching declared job,
 	// one undeclared job (must be deleted).
-	spec := switchSetSpec("0 0 22 * * *", boolPtr(true), false)
+	spec := switchSetSpec("0 0 22 * * *", new(true), false)
 	matchingJob := shelly.ScheduleJob{
 		ID:       2,
 		Enable:   true,

@@ -14,8 +14,6 @@ import (
 
 func hostOf(url string) string { return strings.TrimPrefix(url, "http://") }
 
-func boolPtr(b bool) *bool { return &b }
-
 func createDashProfile(t *testing.T, ns string, cfg shellyv1alpha1.ProfileConfig) {
 	t.Helper()
 	p := &shellyv1alpha1.ShellyProfile{
@@ -41,7 +39,7 @@ func TestDeviceDetailShowsDiffAndRedactsSecrets(t *testing.T) {
 	defer srv.Close()
 	createDashDevice(t, ns, "AABBCCDDEE62", hostOf(srv.URL), true, "plugs", []string{"sys"})
 	createDashProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	code, body := get(t, newServer(ns), "/device/aabbccddee62")

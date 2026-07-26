@@ -81,7 +81,7 @@ func TestRegistryStampsLabelsAndAnnotation(t *testing.T) {
 		"bbccddeeaa01": `{"name":"lounge-lamp","room":"Living Room","type":"Lamp","note":"top shelf"}`,
 	})
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r := newRegistryReconciler()
@@ -126,7 +126,7 @@ func TestRegistryUpdateLabels(t *testing.T) {
 		"bbccddeeaa02": `{"room":"Kitchen","type":"Socket"}`,
 	})
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r := newRegistryReconciler()
@@ -167,7 +167,7 @@ func TestRegistryNoEntryNoStamping(t *testing.T) {
 		"other-device": `{"room":"Den"}`,
 	})
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r := newRegistryReconciler()
@@ -202,7 +202,7 @@ func TestRegistryNoSpuriousRewrite(t *testing.T) {
 		"bbccddeeaa04": `{"room":"Office","type":"Lamp"}`,
 	})
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r := newRegistryReconciler()
@@ -242,7 +242,7 @@ func TestRegistryStampsCustomLabels(t *testing.T) {
 		"bbccddeeaa05": `{"name":"Dishwasher","room":"Kitchen","type":"kitchen","labels":{"power-policy":"Always On"}}`,
 	})
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r := newRegistryReconciler()
@@ -281,7 +281,7 @@ func TestRegistryRemovesClearedCustomLabel(t *testing.T) {
 		"bbccddeeaa06": `{"name":"PDU-01","room":"Garage","type":"rack","labels":{"power-policy":"infra"}}`,
 	})
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r := newRegistryReconciler()

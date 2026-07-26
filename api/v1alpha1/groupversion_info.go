@@ -33,6 +33,17 @@ var (
 	GroupVersion = SchemeGroupVersion
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
+	//
+	// controller-runtime v0.24 deprecated scheme.Builder. The stated reason is
+	// dependency hygiene, not correctness: "This helper is only useful in api
+	// packages, but api packages should be easy to import and hence have minimal
+	// dependencies." The helper still works and is not scheduled for removal, and
+	// kubebuilder's own scaffold still generates exactly this pattern — so
+	// hand-rolling an apimachinery-only replacement here would diverge from the
+	// scaffold and put CRD type registration (the thing every controller and every
+	// envtest suite depends on) at risk for an advisory lint. Suppressed
+	// deliberately; worth revisiting as its own change, not inside a dependency bump.
+	//nolint:staticcheck // SA1019: scheme.Builder deprecation is advisory (import weight); see above
 	SchemeBuilder = &scheme.Builder{GroupVersion: SchemeGroupVersion}
 
 	// AddToScheme adds the types in this group-version to the given scheme.

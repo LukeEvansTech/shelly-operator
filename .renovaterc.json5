@@ -1,4 +1,31 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["github>LukeEvansTech/renovate-config"],
+
+  packageRules: [
+    {
+      // controller-runtime is version-locked to a specific Kubernetes minor:
+      // v0.23.x builds against k8s 0.35, v0.24.x against k8s 0.36. Renovate's
+      // built-in monorepo grouping covers k8s.io/* (one repo) but NOT
+      // sigs.k8s.io/controller-runtime, which lives in its own repo — so it
+      // raised a k8s.io-only PR and left controller-runtime behind.
+      //
+      // The result does not compile, and it fails deep inside a dependency
+      // rather than in our code, which makes it look unrelated to the bump:
+      //   controller-runtime@v0.23.3/pkg/cache/multi_namespace_cache.go:363:9:
+      //   handlerRegistration does not implement
+      //   cache.ResourceEventHandlerRegistration (missing method HasSyncedChecker)
+      // That is what broke PR #19 (kubernetes monorepo v0.35.0 -> v0.36.3) on
+      // both the `test` and `docker-build` checks.
+      //
+      // Grouping them forces one PR that moves the whole set together, so the
+      // skew cannot be proposed again. Only the API/runtime packages are
+      // grouped: sigs.k8s.io/yaml, /json, /randfill and /structured-merge-diff
+      // are versioned independently of the Kubernetes release train.
+      description: "Group controller-runtime with the Kubernetes libraries — their versions are locked together",
+      matchManagers: ["gomod"],
+      matchPackageNames: ["k8s.io/**", "sigs.k8s.io/controller-runtime"],
+      groupName: "kubernetes",
+    },
+  ],
 }

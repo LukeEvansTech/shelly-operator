@@ -98,8 +98,6 @@ func reconcile(t *testing.T, r *ShellyDeviceReconciler, ns, name string) *shelly
 	return &dev
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestReconcileDriftDetected(t *testing.T) {
 	ns := newNamespace(t)
 	fake := &shellytest.Device{ID: "dev1", MAC: "AABBCCDDEE20", Gen: 2, InitialConfig: map[string]map[string]any{
@@ -110,8 +108,8 @@ func TestReconcileDriftDetected(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE20", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)}, // drifted
-		Cloud:  &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},  // in sync
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)}, // drifted
+		Cloud:  &shellyv1alpha1.CloudSection{Enable: new(false)},  // in sync
 	})
 
 	r, rec := newReconciler()
@@ -146,7 +144,7 @@ func TestReconcileInSync(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE21", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -227,7 +225,7 @@ func TestReconcileAuthDrift(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE25", hostOf(srv.URL), true, false, "") // status.authEnabled=false
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Auth: &shellyv1alpha1.AuthSection{Enable: boolPtr(true)},
+		Auth: &shellyv1alpha1.AuthSection{Enable: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -241,7 +239,7 @@ func TestReconcileConfigFetchFailedKeepsProfile(t *testing.T) {
 	ns := newNamespace(t)
 	createDevice(t, ns, "AABBCCDDEE26", "127.0.0.1:1", true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 	r, _ := newReconciler()
 	dev := reconcile(t, r, ns, "aabbccddee26")
@@ -261,7 +259,7 @@ func TestReconcileAuthRequired(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE27", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 	r, _ := newReconciler()
 	dev := reconcile(t, r, ns, "aabbccddee27")
@@ -331,7 +329,7 @@ func TestReconcileFixpointNoStatusChurn(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE2A", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 	r, _ := newReconciler()
 	first := reconcile(t, r, ns, "aabbccddee2a")
@@ -424,7 +422,7 @@ func TestEnforceCorrectsDrift(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE30", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, rec := newReconciler()
@@ -457,7 +455,7 @@ func TestEnforceObserveModeNeverWrites(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE31", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe mode
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -479,9 +477,9 @@ func TestEnforceAuthRolloutOrdersAuthLast(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE32", hostOf(srv.URL), true, false, "")
 	createPasswordSecret(t, ns, "hunter2")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(true),
+			Enable:            new(true),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
 		},
 	})
@@ -519,7 +517,7 @@ func TestEnforceMissingPasswordSecret(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE33", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(true),
+			Enable:            new(true),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "nope", Key: "password"},
 		},
 	})
@@ -544,7 +542,7 @@ func TestEnforceApplyFailureSurfaces(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE34", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -567,7 +565,7 @@ func TestEnforceRestartRequiredEvent(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE35", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, rec := newReconciler()
@@ -597,9 +595,9 @@ func TestAuthEnabledDeviceUsesProfilePassword(t *testing.T) {
 	}
 	createPasswordSecret(t, ns, "hunter2")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(true),
+			Enable:            new(true),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
 		},
 	})
@@ -621,7 +619,7 @@ func TestEnforceRecheckFailureIsNotApplyFailed(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE38", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, rec := newReconciler()
@@ -660,7 +658,7 @@ func TestEnforceAuthDisable(t *testing.T) {
 	createPasswordSecret(t, ns, "hunter2")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(false),
+			Enable:            new(false),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
 		},
 	})
@@ -689,7 +687,7 @@ func TestWrongPasswordCannotSelfCorrect(t *testing.T) {
 	createPasswordSecret(t, ns, "wrong")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(true),
+			Enable:            new(true),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
 		},
 	})
@@ -719,7 +717,7 @@ func TestEnforceNonConvergenceDamping(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE3B", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -748,7 +746,8 @@ func TestEnforceNonConvergenceDamping(t *testing.T) {
 	}
 }
 
-func ptrInt32(v int32) *int32 { return &v }
+//go:fix inline
+func ptrInt32(v int32) *int32 { return new(v) }
 
 func TestEnforceDampingRearmsOnValueChange(t *testing.T) {
 	ns := newNamespace(t)
@@ -803,7 +802,7 @@ func TestEnforceSwitchConfig(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE3D", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Switch: &shellyv1alpha1.SwitchSection{AutoOff: boolPtr(true), AutoOffDelay: ptrInt32(300)},
+		Switch: &shellyv1alpha1.SwitchSection{AutoOff: new(true), AutoOffDelay: ptrInt32(300)},
 	})
 
 	r, _ := newReconciler()
@@ -839,7 +838,7 @@ func TestEnforceSwitchProtectionLimits(t *testing.T) {
 		Switch: &shellyv1alpha1.SwitchSection{
 			VoltageLimit:             ptrInt32(260),
 			CurrentLimit:             ptrInt32(16),
-			AutorecoverVoltageErrors: boolPtr(true),
+			AutorecoverVoltageErrors: new(true),
 		},
 	})
 
@@ -877,14 +876,14 @@ func TestEnforceWifiAppliedLastWithPasswordInjected(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE40", hostOf(srv.URL), true, false, "")
 	createWifiSecret(t, ns)
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Cloud: &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},
+		Cloud: &shellyv1alpha1.CloudSection{Enable: new(false)},
 		Wifi: &shellyv1alpha1.WifiSection{
 			Sta: &shellyv1alpha1.WifiNetwork{
-				Enable:        boolPtr(true),
+				Enable:        new(true),
 				SSID:          "iot-new",
 				PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "wifi-creds", Key: "new"},
 			},
-			Sta1: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-old"},
+			Sta1: &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-old"},
 		},
 	})
 
@@ -938,8 +937,8 @@ func TestEnforceWifiDeviceVanishesAfterApply(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE41", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			Sta:  &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-new"},
-			Sta1: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-old"},
+			Sta:  &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-new"},
+			Sta1: &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-old"},
 		},
 	})
 
@@ -965,7 +964,7 @@ func TestEnforceWifiMissingSecretIsCredentialsError(t *testing.T) {
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
 			Sta: &shellyv1alpha1.WifiNetwork{
-				Enable:        boolPtr(true),
+				Enable:        new(true),
 				SSID:          "iot-new",
 				PassSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "nope", Key: "new"},
 			},
@@ -1023,8 +1022,8 @@ func TestObserveNeverWritesWifi(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE44", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe; wifi drifted
 		Wifi: &shellyv1alpha1.WifiSection{
-			Sta:  &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-new"},
-			Sta1: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot-old"},
+			Sta:  &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-new"},
+			Sta1: &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot-old"},
 		},
 	})
 
@@ -1060,7 +1059,7 @@ func TestWifiStaDeclaredDisabledWarns(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE45", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe; matches the device -> no drift
 		Wifi: &shellyv1alpha1.WifiSection{
-			Sta: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(false), SSID: "iot-old"},
+			Sta: &shellyv1alpha1.WifiNetwork{Enable: new(false), SSID: "iot-old"},
 		},
 	})
 
@@ -1145,7 +1144,7 @@ func TestFirmwareCompliantAppJobNoWrites(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEF01", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -1174,7 +1173,7 @@ func TestFirmwareEnforceCreatesJob(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEF02", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -1207,7 +1206,7 @@ func TestFirmwareEnforceDeletesBetaJob(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEF03", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -1250,7 +1249,7 @@ func TestFirmwareEnforceDisableDeletesJobs(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEF04", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(false)},
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: new(false)},
 	})
 
 	r, _ := newReconciler()
@@ -1273,7 +1272,7 @@ func TestFirmwareObserveModeReportsDriftWithoutWrites(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEF05", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{ // observe mode
-		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: boolPtr(true)},
+		Firmware: &shellyv1alpha1.FirmwareSection{AutoUpdate: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -1299,7 +1298,7 @@ func TestFirmwareUnmanagedSkipsScheduleRPC(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEF06", hostOf(srv.URL), true, false, "")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		Cloud: &shellyv1alpha1.CloudSection{Enable: boolPtr(false)},
+		Cloud: &shellyv1alpha1.CloudSection{Enable: new(false)},
 	})
 
 	r, _ := newReconciler()
@@ -1321,7 +1320,7 @@ func TestEnforceBLEEnable(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDF001", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		BLE: &shellyv1alpha1.BLESection{Enable: boolPtr(true)},
+		BLE: &shellyv1alpha1.BLESection{Enable: new(true)},
 	})
 
 	r, _ := newReconciler()
@@ -1345,8 +1344,6 @@ func TestEnforceBLEEnable(t *testing.T) {
 	}
 }
 
-func strPtr(s string) *string { return &s }
-
 func TestEnforceSysTimezone(t *testing.T) {
 	ns := newNamespace(t)
 	fake := &shellytest.Device{ID: "devtz1", MAC: "AABBCCDDF002", Gen: 2, InitialConfig: map[string]map[string]any{
@@ -1359,7 +1356,7 @@ func TestEnforceSysTimezone(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDF002", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{Timezone: strPtr("Europe/London")},
+		System: &shellyv1alpha1.SystemSection{Timezone: new("Europe/London")},
 	})
 
 	r, _ := newReconciler()
@@ -1425,8 +1422,8 @@ func TestEnforceUILEDModeAndButton(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDEE50", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		UI: &shellyv1alpha1.UISection{
-			LEDMode:      strPtr("off"),
-			ButtonInMode: strPtr("detached"),
+			LEDMode:      new("off"),
+			ButtonInMode: new("detached"),
 		},
 	})
 
@@ -1475,7 +1472,7 @@ func TestEnforceUINightMode(t *testing.T) {
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		UI: &shellyv1alpha1.UISection{
 			NightMode: &shellyv1alpha1.NightMode{
-				Enable:        boolPtr(true),
+				Enable:        new(true),
 				Brightness:    ptrInt32(50),
 				ActiveBetween: []string{"23:00", "06:00"},
 			},
@@ -1515,7 +1512,7 @@ func TestEnforceUIAlreadyInSync(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE52", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		UI: &shellyv1alpha1.UISection{LEDMode: strPtr("off")},
+		UI: &shellyv1alpha1.UISection{LEDMode: new("off")},
 	})
 
 	r, _ := newReconciler()
@@ -1547,7 +1544,7 @@ func TestEnforceUIRelayDeviceNoOp(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDEE53", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		UI: &shellyv1alpha1.UISection{LEDMode: strPtr("power")},
+		UI: &shellyv1alpha1.UISection{LEDMode: new("power")},
 	})
 
 	r, _ := newReconciler()
@@ -1576,8 +1573,8 @@ func TestEnforceSysTimezoneAndEcoModeTogether(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDF003", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			EcoMode:  boolPtr(true),
-			Timezone: strPtr("America/New_York"),
+			EcoMode:  new(true),
+			Timezone: new("America/New_York"),
 		},
 	})
 
@@ -1613,7 +1610,7 @@ func TestEnforceSysSNTPServer(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDE001", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{SNTPServer: strPtr(sntpCloudflare)},
+		System: &shellyv1alpha1.SystemSection{SNTPServer: new(sntpCloudflare)},
 	})
 
 	r, _ := newReconciler()
@@ -1655,7 +1652,7 @@ func TestEnforceSysDiscoverable(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDE002", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{Discoverable: boolPtr(false)},
+		System: &shellyv1alpha1.SystemSection{Discoverable: new(false)},
 	})
 
 	r, _ := newReconciler()
@@ -1688,8 +1685,8 @@ func TestEnforceSysLatLon(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDE003", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			Latitude:  strPtr("51.5074"),
-			Longitude: strPtr("-0.1278"),
+			Latitude:  new("51.5074"),
+			Longitude: new("-0.1278"),
 		},
 	})
 
@@ -1733,12 +1730,12 @@ func TestEnforceSysAllNewLeaves(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDE004", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
-			EcoMode:      boolPtr(true),
-			Discoverable: boolPtr(false),
-			Timezone:     strPtr("Europe/London"),
-			Latitude:     strPtr("51.5074"),
-			Longitude:    strPtr("-0.1278"),
-			SNTPServer:   strPtr(sntpCloudflare),
+			EcoMode:      new(true),
+			Discoverable: new(false),
+			Timezone:     new("Europe/London"),
+			Latitude:     new("51.5074"),
+			Longitude:    new("-0.1278"),
+			SNTPServer:   new(sntpCloudflare),
 		},
 	})
 
@@ -1789,7 +1786,7 @@ func TestEnforceWifiAP(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDE010", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			AP: &shellyv1alpha1.WifiAP{Enable: boolPtr(false), RangeExtender: boolPtr(false)},
+			AP: &shellyv1alpha1.WifiAP{Enable: new(false), RangeExtender: new(false)},
 		},
 	})
 
@@ -1876,7 +1873,7 @@ func TestEnforceWifiAPAndRoamInSync(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDE012", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			AP:   &shellyv1alpha1.WifiAP{Enable: boolPtr(false)},
+			AP:   &shellyv1alpha1.WifiAP{Enable: new(false)},
 			Roam: &shellyv1alpha1.WifiRoam{RSSIThreshold: ptrInt32(-80), Interval: ptrInt32(60)},
 		},
 	})
@@ -1911,8 +1908,8 @@ func TestEnforceWifiAPRoamDoesNotInterfereWithStaAppliedLogic(t *testing.T) {
 	createDevice(t, ns, "AABBCCDDE013", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		Wifi: &shellyv1alpha1.WifiSection{
-			Sta: &shellyv1alpha1.WifiNetwork{Enable: boolPtr(true), SSID: "iot"},
-			AP:  &shellyv1alpha1.WifiAP{Enable: boolPtr(false)},
+			Sta: &shellyv1alpha1.WifiNetwork{Enable: new(true), SSID: "iot"},
+			AP:  &shellyv1alpha1.WifiAP{Enable: new(false)},
 		},
 	})
 
@@ -1942,7 +1939,7 @@ func TestEnforceWSEnable(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDE020", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		WS: &shellyv1alpha1.WSSection{Enable: boolPtr(false)},
+		WS: &shellyv1alpha1.WSSection{Enable: new(false)},
 	})
 
 	r, _ := newReconciler()
@@ -1975,7 +1972,7 @@ func TestEnforceWSAlreadyInSync(t *testing.T) {
 	defer srv.Close()
 	createDevice(t, ns, "AABBCCDDE021", hostOf(srv.URL), true, false, "")
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		WS: &shellyv1alpha1.WSSection{Enable: boolPtr(false)},
+		WS: &shellyv1alpha1.WSSection{Enable: new(false)},
 	})
 
 	r, _ := newReconciler()
@@ -2053,7 +2050,7 @@ func TestEnforceSysDebugLevelDoesNotClobberSntp(t *testing.T) {
 	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
 		System: &shellyv1alpha1.SystemSection{
 			DebugLevel: ptrInt32(0),
-			SNTPServer: strPtr(sntpCloudflare),
+			SNTPServer: new(sntpCloudflare),
 		},
 	})
 
@@ -2099,9 +2096,9 @@ func TestReconcileReusesDigestNonceAcrossReconciles(t *testing.T) {
 	}
 	createPasswordSecret(t, ns, "hunter2")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(true),
+			Enable:            new(true),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
 		},
 	})
@@ -2147,9 +2144,9 @@ func TestReconcileStampsAvailableFirmwareOnAuthedDevice(t *testing.T) {
 	}
 	createPasswordSecret(t, ns, "hunter2")
 	createProfile(t, ns, shellyv1alpha1.ProfileConfig{
-		System: &shellyv1alpha1.SystemSection{EcoMode: boolPtr(true)},
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
 		Auth: &shellyv1alpha1.AuthSection{
-			Enable:            boolPtr(true),
+			Enable:            new(true),
 			PasswordSecretRef: &shellyv1alpha1.SecretKeyRef{Name: "device-admin", Key: "password"},
 		},
 	})

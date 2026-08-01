@@ -107,6 +107,13 @@ func main() {
 	var exporterConfigMap string
 	flag.StringVar(&exporterConfigMap, "exporter-configmap", "",
 		"ConfigMap (in --device-namespace) to maintain with shelly_exporter's config.yaml. Empty disables the feed.")
+	var exporterDeviceUpdateInterval time.Duration
+	flag.DurationVar(&exporterDeviceUpdateInterval, "exporter-device-update-interval", 30*time.Second,
+		"deviceUpdateInterval written into the exporter config: how often the exporter polls EACH device. "+
+			"The exporter issues ~6 RPCs per device per cycle, so this dominates total RPC load on the fleet. "+
+			"Polling faster than Prometheus scrapes the exporter is wasted work -- the extra samples are "+
+			"overwritten before they are ever read -- and Shelly firmware 2.0.0 answers HTTP 429 under load, "+
+			"which leaves devices unverifiable. Match it to the scrape interval.")
 	var dashboardAddr string
 	flag.StringVar(&dashboardAddr, "dashboard-bind", ":8090",
 		"Listen address for the read-only dashboard. Empty disables it.")
@@ -117,6 +124,15 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// The exporter config carries this as whole seconds, so anything under 1s
+	// truncates to 0 -- which the exporter reads as "no delay" and turns into an
+	// unbounded poll loop against every device. Fail fast rather than ship that.
+	if exporterConfigMap != "" && exporterDeviceUpdateInterval < time.Second {
+		setupLog.Error(nil, "--exporter-device-update-interval must be at least 1s",
+			"got", exporterDeviceUpdateInterval.String())
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -243,7 +259,7 @@ func main() {
 			ConfigMapName: exporterConfigMap,
 			Options: exporterfeed.Options{
 				ListenAddress:        ":8080",
-				DeviceUpdateInterval: 30,
+				DeviceUpdateInterval: int(exporterDeviceUpdateInterval.Seconds()),
 			},
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "ExporterFeed")

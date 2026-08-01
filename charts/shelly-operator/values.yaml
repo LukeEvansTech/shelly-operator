@@ -4,7 +4,7 @@ image:
   # Container image repository for the operator.
   repository: ghcr.io/lukeevanstech/shelly-operator
   # Image tag. Empty defaults to .Chart.AppVersion.
-  tag: "@sha256:31b1ec219fe012f3dde9ec822b10611a27ccb8de18f7481026da1e4f1cc87256"
+  tag: "@sha256:378356b126a9d1b2941c98fe40ddbc4e123f1ecc955f7e83ada58a1c173a53c3"
   # Image pull policy.
   pullPolicy: IfNotPresent
 

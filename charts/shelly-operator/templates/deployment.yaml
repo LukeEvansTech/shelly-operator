@@ -45,6 +45,9 @@ spec:
             {{- with .Values.exporterConfigMap }}
             - --exporter-configmap={{ . }}
             {{- end }}
+            {{- if .Values.exporterConfigMap }}
+            - --exporter-device-update-interval={{ .Values.exporterDeviceUpdateInterval }}
+            {{- end }}
             {{- /* Binary defaults --dashboard-bind to ":8090"; explicit-empty
                    disables the dashboard. */}}
             {{- if .Values.dashboard.enabled }}

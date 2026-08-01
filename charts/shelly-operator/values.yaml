@@ -28,6 +28,14 @@ nameMap: shelly-names
 reconcileInterval: 5m
 # ConfigMap the operator renders for shelly_exporter. "" disables the feed.
 exporterConfigMap: ""
+# How often the exporter polls EACH device, written into that rendered config.
+# This dominates RPC load on the fleet: the exporter issues ~6 RPCs per device
+# per cycle, against ~1 per device per reconcileInterval from the operator.
+# Set it to your Prometheus scrape interval -- polling faster only produces
+# samples that are overwritten before they are ever scraped, and Shelly firmware
+# 2.0.0 answers HTTP 429 under load, which leaves devices unverifiable.
+# Ignored unless exporterConfigMap is set. Minimum 1s.
+exporterDeviceUpdateInterval: 30s
 
 dashboard:
   # Serve the read-only dashboard.

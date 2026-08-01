@@ -39,6 +39,24 @@ listenAddress: :8080
 	}
 }
 
+// The poll interval is the single biggest driver of RPC load on the fleet (the
+// exporter issues ~6 RPCs per device per cycle), so it is operator-configurable
+// rather than fixed. Guard that a non-default value actually reaches the config
+// and is not quietly pinned to the old hardcoded 30.
+func TestRenderConfigHonoursDeviceUpdateInterval(t *testing.T) {
+	devs := []shellyv1alpha1.ShellyDevice{feedDev("a", "10.32.8.10", true)}
+	got, err := RenderConfig(devs, Options{ListenAddress: ":8080", DeviceUpdateInterval: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "deviceUpdateInterval: 60") {
+		t.Errorf("configured interval must be rendered, got:\n%s", got)
+	}
+	if strings.Contains(got, "deviceUpdateInterval: 30") {
+		t.Errorf("interval must not fall back to the old hardcoded 30:\n%s", got)
+	}
+}
+
 func TestRenderConfigEmptyFleet(t *testing.T) {
 	got, err := RenderConfig(nil, Options{ListenAddress: ":8080", DeviceUpdateInterval: 30})
 	if err != nil {

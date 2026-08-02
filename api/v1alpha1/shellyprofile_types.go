@@ -78,6 +78,41 @@ type ShellyProfileSpec struct {
 	// +kubebuilder:default=false
 	// +optional
 	RebootWhenRequired bool `json:"rebootWhenRequired,omitempty"`
+
+	// RebootWindow restricts rebootWhenRequired to a daily time window, so
+	// devices are not power-cycled at whatever moment a reconcile happens to
+	// notice. Omitted means any time.
+	//
+	// Ignored unless rebootWhenRequired is set.
+	// +optional
+	RebootWindow *RebootWindow `json:"rebootWindow,omitempty"`
+}
+
+// RebootWindow is a daily local-time window in which reboots may happen.
+//
+// Make it comfortably wider than the operator's --reconcile-interval. A device
+// is only rebooted by a reconcile that lands inside the window, so a window
+// narrower than the interval can be stepped over entirely and the reboot then
+// waits another day.
+type RebootWindow struct {
+	// Start of the window, "HH:MM" in 24-hour local time.
+	// +kubebuilder:validation:Pattern=`^([01][0-9]|2[0-3]):[0-5][0-9]$`
+	Start string `json:"start"`
+
+	// End of the window, "HH:MM" in 24-hour local time. An End earlier than
+	// Start wraps over midnight, e.g. 23:00-01:00.
+	// +kubebuilder:validation:Pattern=`^([01][0-9]|2[0-3]):[0-5][0-9]$`
+	End string `json:"end"`
+
+	// TimeZone is the IANA zone the window is expressed in, e.g.
+	// "Europe/London". Defaults to UTC.
+	//
+	// Set it explicitly if you mean wall-clock time: the operator container
+	// has no TZ of its own, so an unset zone means a "09:00" window fires at
+	// 10:00 local through British Summer Time. Naming the zone also makes the
+	// window follow DST rather than drifting by an hour twice a year.
+	// +optional
+	TimeZone string `json:"timeZone,omitempty"`
 }
 
 // ProfileConfig declares desired device configuration. Every section is

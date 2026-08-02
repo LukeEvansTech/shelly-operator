@@ -501,6 +501,20 @@ func (r *ShellyDeviceReconciler) rebootIfRequested(
 	if !dev.Status.RestartRequired {
 		return
 	}
+	ok, err := withinRebootWindow(time.Now(), profile.Spec.RebootWindow)
+	if err != nil {
+		// A malformed window must never degrade to "reboot any time" -- that
+		// would turn a typo into unattended power cycling at an arbitrary
+		// hour. Surface it and leave the device alone.
+		if r.Recorder != nil {
+			r.Recorder.Event(dev, corev1.EventTypeWarning, "RebootWindowInvalid",
+				fmt.Sprintf("not rebooting: %v", err))
+		}
+		return
+	}
+	if !ok {
+		return
+	}
 	if err := c.Reboot(ctx); err != nil {
 		// The device drops the connection as it restarts, so a transport
 		// error here often means the reboot DID happen. Record it and let

@@ -509,6 +509,38 @@ spec:
                   Ignored in observe mode: a profile that does not write config has no
                   business rebooting hardware.
                 type: boolean
+              rebootWindow:
+                description: |-
+                  RebootWindow restricts rebootWhenRequired to a daily time window, so
+                  devices are not power-cycled at whatever moment a reconcile happens to
+                  notice. Omitted means any time.
+
+                  Ignored unless rebootWhenRequired is set.
+                properties:
+                  end:
+                    description: |-
+                      End of the window, "HH:MM" in 24-hour local time. An End earlier than
+                      Start wraps over midnight, e.g. 23:00-01:00.
+                    pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+                    type: string
+                  start:
+                    description: Start of the window, "HH:MM" in 24-hour local time.
+                    pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+                    type: string
+                  timeZone:
+                    description: |-
+                      TimeZone is the IANA zone the window is expressed in, e.g.
+                      "Europe/London". Defaults to UTC.
+
+                      Set it explicitly if you mean wall-clock time: the operator container
+                      has no TZ of its own, so an unset zone means a "09:00" window fires at
+                      10:00 local through British Summer Time. Naming the zone also makes the
+                      window follow DST rather than drifting by an hour twice a year.
+                    type: string
+                required:
+                - end
+                - start
+                type: object
               selector:
                 description: |-
                   Selector matches ShellyDevices by their discovery labels

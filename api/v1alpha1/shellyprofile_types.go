@@ -61,6 +61,23 @@ type ShellyProfileSpec struct {
 	// are unmanaged.
 	// +optional
 	Config ProfileConfig `json:"config,omitempty"`
+
+	// RebootWhenRequired lets the operator reboot a matched device when the
+	// device reports that a setting needs a restart to take effect
+	// (status.restartRequired). Default false: a reboot is a physical act on
+	// whatever the plug feeds, so it is opt-in per profile rather than
+	// fleet-wide.
+	//
+	// Only ever set this on profiles whose loads tolerate an interruption.
+	// Do NOT set it on a profile covering an out-of-band access path or
+	// anything mid-task -- clearing a config flag is never worth losing the
+	// route you would use to fix a failure.
+	//
+	// Ignored in observe mode: a profile that does not write config has no
+	// business rebooting hardware.
+	// +kubebuilder:default=false
+	// +optional
+	RebootWhenRequired bool `json:"rebootWhenRequired,omitempty"`
 }
 
 // ProfileConfig declares desired device configuration. Every section is

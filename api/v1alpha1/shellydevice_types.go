@@ -81,6 +81,20 @@ type ShellyDeviceStatus struct {
 	// +optional
 	AuthEnabled bool `json:"authEnabled,omitempty"`
 
+	// RestartRequired reports the device's standing "a setting needs a
+	// reboot to take effect" flag, read from Sys.GetStatus.
+	//
+	// It is deliberately separate from the InSync condition, because the
+	// two answer different questions and InSync cannot answer this one:
+	// InSync compares the device's REPORTED config against the profile, and
+	// a value that needs a restart is already reported as written. So a
+	// device can sit InSync=True with a setting that is not actually live.
+	// Surfacing it here (rather than only as the transient RestartRequired
+	// Event raised at write time) means the state survives, since Events
+	// expire long before anyone reboots the device.
+	// +optional
+	RestartRequired bool `json:"restartRequired,omitempty"`
+
 	// DeviceName is the name currently configured on the device itself.
 	// +optional
 	DeviceName string `json:"deviceName,omitempty"`
@@ -119,6 +133,7 @@ type ShellyDeviceStatus struct {
 // +kubebuilder:printcolumn:name="In Sync",type=string,JSONPath=`.status.conditions[?(@.type=="InSync")].status`
 // +kubebuilder:printcolumn:name="Firmware",type=string,JSONPath=`.status.firmware`,priority=1
 // +kubebuilder:printcolumn:name="Update",type=string,JSONPath=`.status.availableFirmware`,priority=1
+// +kubebuilder:printcolumn:name="Restart Req",type=boolean,JSONPath=`.status.restartRequired`,priority=1
 
 // ShellyDevice represents one discovered Shelly Gen2+ device. Objects are
 // created and maintained by the discovery sweeper (named by lowercased

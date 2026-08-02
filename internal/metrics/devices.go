@@ -48,6 +48,17 @@ var (
 		"1 if a firmware update is available for the device, 0 otherwise",
 		[]string{"mac", "name", "room", "appliance"}, nil,
 	)
+
+	// Deliberately its own series rather than something folded into
+	// shelly_device_in_sync: a device pending a restart reports its config as
+	// already written, so it is in sync AND not yet doing what was asked.
+	// Without this the state is invisible -- the operator's RestartRequired
+	// Event expires within the hour, long before anyone reboots the device.
+	descRestartRequired = prometheus.NewDesc(
+		"shelly_device_restart_required",
+		"1 if the device reports a setting that needs a restart to take effect, 0 otherwise",
+		[]string{"mac", "name", "room", "appliance"}, nil,
+	)
 )
 
 // DeviceCollector is a prometheus.Collector that emits per-device fleet-health
@@ -69,11 +80,12 @@ func NewDeviceCollector(reader client.Reader, namespace, registryName string) *D
 }
 
 // Describe implements prometheus.Collector. It sends the descriptors for all
-// three gauge families to the channel.
+// four gauge families to the channel.
 func (c *DeviceCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descOnline
 	ch <- descInSync
 	ch <- descUpdateAvailable
+	ch <- descRestartRequired
 }
 
 // Collect implements prometheus.Collector. It lists all ShellyDevices in the
@@ -99,6 +111,9 @@ func (c *DeviceCollector) Collect(ch chan<- prometheus.Metric) {
 
 		ch <- prometheus.MustNewConstMetric(descUpdateAvailable, prometheus.GaugeValue,
 			boolToFloat(dev.Status.AvailableFirmware != ""), mac, name, room, appliance)
+
+		ch <- prometheus.MustNewConstMetric(descRestartRequired, prometheus.GaugeValue,
+			boolToFloat(dev.Status.RestartRequired), mac, name, room, appliance)
 	}
 }
 

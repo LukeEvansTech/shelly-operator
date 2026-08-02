@@ -71,3 +71,30 @@ func TestCallNonRPCServer(t *testing.T) {
 		t.Errorf("expected status-500 error, got %v", err)
 	}
 }
+
+// TestRebootCallsRPC verifies Reboot issues Shelly.Reboot. Kept explicit
+// because this is the one client call that acts on hardware rather than
+// config: a wrong method name here would fail silently and leave devices
+// pending a restart forever.
+func TestRebootCallsRPC(t *testing.T) {
+	fake := &shellytest.Device{ID: "rb1", MAC: "AABBCCDDEEFF", Gen: 2, RestartRequired: true}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+
+	c := shelly.NewClient(hostOf(srv.URL))
+	if err := c.Reboot(context.Background()); err != nil {
+		t.Fatalf("Reboot: %v", err)
+	}
+	found := false
+	for _, call := range fake.RecordedCalls() {
+		if call.Method == "Shelly.Reboot" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected Shelly.Reboot to be called")
+	}
+	if fake.RestartRequired {
+		t.Error("device should have cleared restart_required after the reboot")
+	}
+}

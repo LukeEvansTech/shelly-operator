@@ -19,6 +19,14 @@ type AvailableUpdates struct {
 // SysStatus is the subset of Sys.GetStatus the operator consumes.
 type SysStatus struct {
 	AvailableUpdates AvailableUpdates `json:"available_updates"`
+
+	// RestartRequired is the device's own standing flag: some applied
+	// setting needs a reboot before it takes effect. It matters because it
+	// is the one thing a config diff cannot see -- Shelly.GetConfig reports
+	// the value that was WRITTEN, so a device can read fully in sync while
+	// the setting is not actually live. Reading it here is free: the
+	// operator already makes this call for available_updates.
+	RestartRequired bool `json:"restart_required"`
 }
 
 // GetSysStatus fetches the device's system status. Goes through POST

@@ -2311,3 +2311,81 @@ func TestNoRebootWhenDeviceIsNotAsking(t *testing.T) {
 		t.Error("must not reboot a device that is not reporting restart_required")
 	}
 }
+
+// windowAround builds a window offset from now by whole minutes, so the test
+// is deterministic whatever time of day CI runs at. Offsets wrap the clock.
+func windowAround(startOffset, endOffset time.Duration) *shellyv1alpha1.RebootWindow {
+	now := time.Now().UTC()
+	f := func(d time.Duration) string { return now.Add(d).Format("15:04") }
+	return &shellyv1alpha1.RebootWindow{Start: f(startOffset), End: f(endOffset), TimeZone: "UTC"}
+}
+
+// A closed window must hold the reboot back even though everything else says
+// go. This is what makes "reboot at 09:00" mean 09:00 rather than "whenever a
+// reconcile next notices".
+func TestNoRebootOutsideWindow(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev95", MAC: "AABBCCDDEE95", Gen: 2, RestartRequired: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE95", hostOf(srv.URL), true, false, "")
+
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector:           &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:               shellyv1alpha1.ModeEnforce,
+			RebootWhenRequired: true,
+			RebootWindow:       windowAround(3*time.Hour, 4*time.Hour), // opens later today
+			Config:             shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: new(true)}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee95")
+	if rebootCalled(fake) {
+		t.Error("rebooted outside the profile's reboot window")
+	}
+	if !dev.Status.RestartRequired {
+		t.Error("the pending flag must survive so the next in-window reconcile still acts on it")
+	}
+}
+
+// ...and an open window must let it through, so the gate is not just always-off.
+func TestRebootInsideWindow(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev96", MAC: "AABBCCDDEE96", Gen: 2, RestartRequired: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE96", hostOf(srv.URL), true, false, "")
+
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector:           &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:               shellyv1alpha1.ModeEnforce,
+			RebootWhenRequired: true,
+			RebootWindow:       windowAround(-1*time.Hour, 1*time.Hour), // open now
+			Config:             shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: new(true)}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee96")
+	if !rebootCalled(fake) {
+		t.Fatal("an open window should allow the reboot")
+	}
+	if dev.Status.RestartRequired {
+		t.Error("status.restartRequired should clear after the reboot")
+	}
+}

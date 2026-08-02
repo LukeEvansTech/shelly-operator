@@ -2159,3 +2159,155 @@ func TestReconcileStampsAvailableFirmwareOnAuthedDevice(t *testing.T) {
 			"with the resolved password; the sweeper cannot)", got.Status.AvailableFirmware, "2.0.0")
 	}
 }
+
+// createRebootProfile is createEnforceProfile with the opt-in reboot flag set.
+func createRebootProfile(t *testing.T, ns string, mode string, reboot bool, cfg shellyv1alpha1.ProfileConfig) {
+	t.Helper()
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector:           &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:               mode,
+			RebootWhenRequired: reboot,
+			Config:             cfg,
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func rebootCalled(fake *shellytest.Device) bool {
+	for _, c := range fake.RecordedCalls() {
+		if c.Method == "Shelly.Reboot" {
+			return true
+		}
+	}
+	return false
+}
+
+// A device already carrying the standing restart_required flag must surface it
+// on status, so the state outlives the transient RestartRequired Event. This is
+// the whole point: without it the only signal expires within the hour.
+func TestStampsRestartRequiredOnStatus(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev90", MAC: "AABBCCDDEE90", Gen: 2, RestartRequired: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE90", hostOf(srv.URL), true, false, "")
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee90")
+	if !dev.Status.RestartRequired {
+		t.Error("status.restartRequired should mirror the device's standing flag")
+	}
+	// Nothing opted in, so the device must be left alone.
+	if rebootCalled(fake) {
+		t.Error("rebooted a device on a profile that never asked for it")
+	}
+}
+
+// The flag must clear itself once the device stops reporting it, otherwise a
+// stale true would alert forever after someone reboots by hand.
+func TestRestartRequiredClearsWhenDeviceStopsReporting(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev91", MAC: "AABBCCDDEE91", Gen: 2, RestartRequired: false, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	d := createDevice(t, ns, "AABBCCDDEE91", hostOf(srv.URL), true, false, "")
+	d.Status.RestartRequired = true
+	if err := k8sClient.Status().Update(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	createEnforceProfile(t, ns, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
+	})
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee91")
+	if dev.Status.RestartRequired {
+		t.Error("status.restartRequired should clear once the device stops reporting it")
+	}
+}
+
+// Opted in + enforce + device asking: reboot, and the device's own flag goes false.
+func TestRebootWhenRequiredOptedIn(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev92", MAC: "AABBCCDDEE92", Gen: 2, RestartRequired: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE92", hostOf(srv.URL), true, false, "")
+	createRebootProfile(t, ns, shellyv1alpha1.ModeEnforce, true, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
+	})
+
+	r, rec := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee92")
+	if !rebootCalled(fake) {
+		t.Fatal("an opted-in profile should reboot a device that is asking for it")
+	}
+	if dev.Status.RestartRequired {
+		t.Error("status.restartRequired should be cleared after a successful reboot")
+	}
+	found := false
+	for len(rec.Events) > 0 {
+		if e := <-rec.Events; strings.Contains(e, "Rebooted") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected a Rebooted event")
+	}
+}
+
+// The safety case that matters most: observe mode must never reboot hardware,
+// even with the opt-in set. A profile that does not write config has no
+// business power-cycling someone's load.
+func TestNoRebootInObserveMode(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev93", MAC: "AABBCCDDEE93", Gen: 2, RestartRequired: true, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": false}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE93", hostOf(srv.URL), true, false, "")
+	createRebootProfile(t, ns, shellyv1alpha1.ModeObserve, true, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
+	})
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee93")
+	if rebootCalled(fake) {
+		t.Error("observe mode must never reboot a device")
+	}
+}
+
+// A device NOT asking for a restart must not be rebooted just because the
+// profile opted in -- the trigger is the device's flag, not the setting.
+func TestNoRebootWhenDeviceIsNotAsking(t *testing.T) {
+	ns := newNamespace(t)
+	fake := &shellytest.Device{ID: "dev94", MAC: "AABBCCDDEE94", Gen: 2, RestartRequired: false, InitialConfig: map[string]map[string]any{
+		"sys": {"device": map[string]any{"eco_mode": true}},
+	}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE94", hostOf(srv.URL), true, false, "")
+	createRebootProfile(t, ns, shellyv1alpha1.ModeEnforce, true, shellyv1alpha1.ProfileConfig{
+		System: &shellyv1alpha1.SystemSection{EcoMode: new(true)},
+	})
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee94")
+	if rebootCalled(fake) {
+		t.Error("must not reboot a device that is not reporting restart_required")
+	}
+}

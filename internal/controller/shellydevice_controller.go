@@ -161,11 +161,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, reason, msg, nil, profile.Name)
 	}
 
-	// Pending-firmware visibility, taken on the client (and nonce) we already
-	// hold. The discovery sweeper cannot do this: Sys.GetStatus goes through
-	// POST /rpc and it has no credentials, so on an auth-enabled device its
-	// read could only 401.
-	r.stampAvailableFirmware(ctx, c, &dev)
+	// Pending-firmware and pending-restart visibility, taken on the client
+	// (and nonce) we already hold. The discovery sweeper cannot do this:
+	// Sys.GetStatus goes through POST /rpc and it has no credentials, so on
+	// an auth-enabled device its read could only 401.
+	r.stampSysStatus(ctx, c, &dev)
 
 	desired := drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err := drift.Diff(desired, actual)
@@ -194,6 +194,13 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return enforceResult, enforceErr
 		}
 	}
+
+	// Last device-touching step of the reconcile: everything below is a
+	// Kubernetes status write, so a device that is mid-restart cannot break
+	// it. Acts only on the flag the DEVICE reports, never on a SetConfig
+	// response -- so a write that needs a restart is rebooted on the next
+	// reconcile, once the device itself confirms it.
+	r.rebootIfRequested(ctx, c, &dev, profile)
 
 	if len(findings) == 0 {
 		return r.finish(ctx, &dev, metav1.ConditionTrue, shellyv1alpha1.ReasonInSync,
@@ -444,29 +451,74 @@ func registryOwnedLabels(dev *shellyv1alpha1.ShellyDevice) []string {
 	return owned
 }
 
-// stampAvailableFirmware refreshes status.availableFirmware from the
-// device's Sys.GetStatus available_updates (stable only; beta is ignored).
-// It is best-effort: a failed read keeps the previously recorded value, and
-// it writes only when the value actually changed, so a steady-state fleet
-// costs no extra API traffic. Called with the reconcile's authenticated
-// client so it rides the nonce already in hand.
-func (r *ShellyDeviceReconciler) stampAvailableFirmware(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) {
+// stampSysStatus refreshes the two status fields that come from the device's
+// Sys.GetStatus rather than from its config: availableFirmware (stable only;
+// beta is ignored) and restartRequired.
+//
+// Both ride ONE call, which the reconcile already had to make -- adding
+// restartRequired costs no extra device RPC, which matters on firmware that
+// answers 429 under load. Best-effort: a failed read keeps the previously
+// recorded values, and it writes only when something actually changed, so a
+// steady-state fleet costs no API traffic. Called with the reconcile's
+// authenticated client so it rides the nonce already in hand.
+func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) {
 	st, err := c.GetSysStatus(ctx)
 	if err != nil {
 		return
 	}
-	want := ""
+	wantFW := ""
 	if st.AvailableUpdates.Stable != nil {
-		want = st.AvailableUpdates.Stable.Version
+		wantFW = st.AvailableUpdates.Stable.Version
 	}
-	if dev.Status.AvailableFirmware == want {
+	if dev.Status.AvailableFirmware == wantFW && dev.Status.RestartRequired == st.RestartRequired {
 		return
 	}
 	base := dev.DeepCopy()
-	dev.Status.AvailableFirmware = want
+	dev.Status.AvailableFirmware = wantFW
+	dev.Status.RestartRequired = st.RestartRequired
 	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err != nil {
 		// Best-effort: keep the object consistent and retry next reconcile.
 		dev.Status.AvailableFirmware = base.Status.AvailableFirmware
+		dev.Status.RestartRequired = base.Status.RestartRequired
+	}
+}
+
+// rebootIfRequested reboots the device when it is asking for a restart and the
+// matched profile has opted in. It runs AFTER enforcement so a single reconcile
+// can write a restart-requiring setting and then make it live.
+//
+// Deliberately narrow. It reboots only when the device itself reports
+// restartRequired, only in enforce mode, and only on an opted-in profile -- a
+// reboot is a physical act on someone's load, so nothing here should ever fire
+// on a profile that merely observes. status.restartRequired is cleared
+// optimistically so the next reconcile re-reads the truth from the device.
+func (r *ShellyDeviceReconciler) rebootIfRequested(
+	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice, profile *shellyv1alpha1.ShellyProfile,
+) {
+	if profile == nil || !profile.Spec.RebootWhenRequired || profile.Spec.Mode != shellyv1alpha1.ModeEnforce {
+		return
+	}
+	if !dev.Status.RestartRequired {
+		return
+	}
+	if err := c.Reboot(ctx); err != nil {
+		// The device drops the connection as it restarts, so a transport
+		// error here often means the reboot DID happen. Record it and let
+		// the next reconcile read the device's own flag rather than guess.
+		if r.Recorder != nil {
+			r.Recorder.Event(dev, corev1.EventTypeWarning, "RebootFailed",
+				fmt.Sprintf("reboot requested but the call did not complete cleanly: %v", err))
+		}
+		return
+	}
+	if r.Recorder != nil {
+		r.Recorder.Event(dev, corev1.EventTypeNormal, "Rebooted",
+			"rebooted to apply a setting the device reported as needing a restart")
+	}
+	base := dev.DeepCopy()
+	dev.Status.RestartRequired = false
+	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err != nil {
+		dev.Status.RestartRequired = base.Status.RestartRequired
 	}
 }
 

@@ -76,6 +76,13 @@ type Device struct {
 	// updates available (renders as an empty object).
 	AvailableUpdates map[string]any
 
+	// RestartRequired seeds Sys.GetStatus restart_required: the device's
+	// STANDING "a setting needs a reboot" flag, as opposed to
+	// RestartOnSetConfig which is the one-shot answer to a write. A real
+	// device keeps this true across reads until it is rebooted, so
+	// Shelly.Reboot clears it here too.
+	RestartRequired bool
+
 	mu             sync.Mutex
 	ha1            string
 	config         map[string]map[string]any // component ("sys", "switch:0") -> config
@@ -209,6 +216,8 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 		d.handleSetAuth(w, req.ID, req.Params)
 	case req.Method == "Sys.GetStatus":
 		d.handleSysGetStatus(w, req.ID)
+	case req.Method == "Shelly.Reboot":
+		d.handleReboot(w, req.ID)
 	case req.Method == "Schedule.List":
 		d.handleScheduleList(w, req.ID)
 	case req.Method == "Schedule.Create":
@@ -260,7 +269,18 @@ func (d *Device) handleSysGetStatus(w http.ResponseWriter, id int64) {
 	if avail == nil {
 		avail = map[string]any{}
 	}
-	writeJSON(w, rpcResult(id, map[string]any{"available_updates": avail}))
+	writeJSON(w, rpcResult(id, map[string]any{
+		"available_updates": avail,
+		"restart_required":  d.RestartRequired,
+	}))
+}
+
+// handleReboot models a real device: the standing restart_required flag is
+// what a reboot clears, so tests can assert the operator drove it to false
+// rather than merely calling the RPC.
+func (d *Device) handleReboot(w http.ResponseWriter, id int64) {
+	d.RestartRequired = false
+	writeJSON(w, rpcResult(id, map[string]any{}))
 }
 
 func (d *Device) handleScheduleList(w http.ResponseWriter, id int64) {

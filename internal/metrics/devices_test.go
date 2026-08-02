@@ -296,3 +296,39 @@ shelly_device_online{appliance="",mac="aabbcc004400",name="pending-device",room=
 		t.Errorf("MAC fallback mismatch:\n%v", err)
 	}
 }
+
+// TestDeviceCollector_RestartRequired verifies the gauge tracks
+// status.restartRequired, including that a device can be InSync AND pending a
+// restart at the same time -- the exact state the metric exists to expose,
+// since a config diff alone reports such a device as entirely healthy.
+func TestDeviceCollector_RestartRequired(t *testing.T) {
+	pending := makeDevice("aabbcc001200", "AABBCC001200", "subwoofer", true, metav1.ConditionTrue, "")
+	pending.Status.RestartRequired = true
+	clean := makeDevice("aabbcc001201", "AABBCC001201", "lamp", true, metav1.ConditionTrue, "")
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithStatusSubresource(&shellyv1alpha1.ShellyDevice{}).
+		WithObjects(pending, clean).
+		Build()
+	col := metrics.NewDeviceCollector(fakeClient, testNamespace, "")
+
+	expected := `# HELP shelly_device_restart_required 1 if the device reports a setting that needs a restart to take effect, 0 otherwise
+# TYPE shelly_device_restart_required gauge
+shelly_device_restart_required{appliance="",mac="AABBCC001200",name="subwoofer",room=""} 1
+shelly_device_restart_required{appliance="",mac="AABBCC001201",name="lamp",room=""} 0
+`
+	if err := testutil.CollectAndCompare(col, strings.NewReader(expected), "shelly_device_restart_required"); err != nil {
+		t.Errorf("shelly_device_restart_required mismatch:\n%v", err)
+	}
+
+	// Both devices are InSync=True, so in_sync alone cannot distinguish them.
+	inSync := `# HELP shelly_device_in_sync 1 if the device InSync condition is True, 0 otherwise
+# TYPE shelly_device_in_sync gauge
+shelly_device_in_sync{appliance="",mac="AABBCC001200",name="subwoofer",room=""} 1
+shelly_device_in_sync{appliance="",mac="AABBCC001201",name="lamp",room=""} 1
+`
+	if err := testutil.CollectAndCompare(col, strings.NewReader(inSync), "shelly_device_in_sync"); err != nil {
+		t.Errorf("in_sync should report both healthy, proving the new metric is load-bearing:\n%v", err)
+	}
+}

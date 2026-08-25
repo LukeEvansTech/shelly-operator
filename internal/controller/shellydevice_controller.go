@@ -165,7 +165,7 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// (and nonce) we already hold. The discovery sweeper cannot do this:
 	// Sys.GetStatus goes through POST /rpc and it has no credentials, so on
 	// an auth-enabled device its read could only 401.
-	r.stampSysStatus(ctx, c, &dev)
+	sysRestartRequired, sysStatusFresh := r.stampSysStatus(ctx, c, &dev)
 
 	desired := drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err := drift.Diff(desired, actual)
@@ -199,8 +199,10 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Kubernetes status write, so a device that is mid-restart cannot break
 	// it. Acts only on the flag the DEVICE reports, never on a SetConfig
 	// response -- so a write that needs a restart is rebooted on the next
-	// reconcile, once the device itself confirms it.
-	r.rebootIfRequested(ctx, c, &dev, profile)
+	// reconcile, once the device itself confirms it. Gated on sysStatusFresh
+	// so a failed Sys.GetStatus this cycle can never make a stale cached
+	// RestartRequired trigger a reboot.
+	r.rebootIfRequested(ctx, c, &dev, profile, sysRestartRequired, sysStatusFresh)
 
 	if len(findings) == 0 {
 		return r.finish(ctx, &dev, metav1.ConditionTrue, shellyv1alpha1.ReasonInSync,
@@ -461,17 +463,24 @@ func registryOwnedLabels(dev *shellyv1alpha1.ShellyDevice) []string {
 // recorded values, and it writes only when something actually changed, so a
 // steady-state fleet costs no API traffic. Called with the reconcile's
 // authenticated client so it rides the nonce already in hand.
-func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) {
+//
+// Returns the device's own restartRequired from THIS cycle's read, plus
+// whether that read actually succeeded. rebootIfRequested must gate on the
+// latter rather than on dev.Status.RestartRequired: that field can still
+// hold a stale value here even on a successful read, because a failed
+// Status().Patch below rolls it back to the pre-read (base) value to keep
+// the in-memory object consistent with what is actually persisted.
+func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) (restartRequired, fresh bool) {
 	st, err := c.GetSysStatus(ctx)
 	if err != nil {
-		return
+		return false, false
 	}
 	wantFW := ""
 	if st.AvailableUpdates.Stable != nil {
 		wantFW = st.AvailableUpdates.Stable.Version
 	}
 	if dev.Status.AvailableFirmware == wantFW && dev.Status.RestartRequired == st.RestartRequired {
-		return
+		return st.RestartRequired, true
 	}
 	base := dev.DeepCopy()
 	dev.Status.AvailableFirmware = wantFW
@@ -481,6 +490,7 @@ func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.C
 		dev.Status.AvailableFirmware = base.Status.AvailableFirmware
 		dev.Status.RestartRequired = base.Status.RestartRequired
 	}
+	return st.RestartRequired, true
 }
 
 // rebootIfRequested reboots the device when it is asking for a restart and the
@@ -492,13 +502,21 @@ func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.C
 // reboot is a physical act on someone's load, so nothing here should ever fire
 // on a profile that merely observes. status.restartRequired is cleared
 // optimistically so the next reconcile re-reads the truth from the device.
+//
+// restartRequired and sysStatusFresh come from THIS cycle's stampSysStatus
+// call, not from dev.Status.RestartRequired: that field can be a value
+// carried over from a prior reconcile (a failed Sys.GetStatus this cycle) or
+// rolled back after a failed status patch, and treating either as current
+// risks an unnecessary reboot on a transient failure. Skip whenever the read
+// did not demonstrably succeed this cycle.
 func (r *ShellyDeviceReconciler) rebootIfRequested(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice, profile *shellyv1alpha1.ShellyProfile,
+	restartRequired, sysStatusFresh bool,
 ) {
 	if profile == nil || !profile.Spec.RebootWhenRequired || profile.Spec.Mode != shellyv1alpha1.ModeEnforce {
 		return
 	}
-	if !dev.Status.RestartRequired {
+	if !sysStatusFresh || !restartRequired {
 		return
 	}
 	ok, err := withinRebootWindow(time.Now(), profile.Spec.RebootWindow)

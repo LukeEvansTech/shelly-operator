@@ -88,6 +88,10 @@ type Device struct {
 	// Otherwise Shelly.Update succeeds and clears AvailableUpdates, as a
 	// completed install would.
 	UpdateError string
+	// UpdateDropConnection makes Shelly.Update accept the request and then
+	// drop the connection without answering, like a device that starts
+	// flashing before its reply gets out.
+	UpdateDropConnection bool
 
 	mu             sync.Mutex
 	ha1            string
@@ -224,6 +228,12 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 		d.handleSysGetStatus(w, req.ID)
 	case req.Method == "Shelly.Reboot":
 		d.handleReboot(w, req.ID)
+	case req.Method == "Shelly.Update" && d.UpdateDropConnection:
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				_ = conn.Close()
+			}
+		}
 	case req.Method == "Shelly.Update":
 		d.handleUpdate(w, req.ID)
 	case req.Method == "Schedule.List":

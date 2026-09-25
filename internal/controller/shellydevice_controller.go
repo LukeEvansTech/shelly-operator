@@ -181,6 +181,14 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// an auth-enabled device its read could only 401.
 	sys := r.stampSysStatus(ctx, c, &dev)
 
+	// Firmware first, independent of config convergence: a device whose
+	// config will not converge (NotConverging damping returns early below)
+	// still gets its update, and that update may be the fix. Once a request
+	// is out, send nothing else this cycle -- the device may be flashing.
+	if r.updateIfAvailable(ctx, c, &dev, profile, sys) {
+		return ctrl.Result{RequeueAfter: updateSettle}, nil
+	}
+
 	desired := drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err := drift.Diff(desired, actual)
 	if err != nil {
@@ -216,13 +224,7 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// reconcile, once the device itself confirms it. Gated on sysStatusFresh
 	// so a failed Sys.GetStatus this cycle can never make a stale cached
 	// RestartRequired trigger a reboot.
-	rebooted := r.rebootIfRequested(ctx, c, &dev, profile, sys.restartRequired, sys.fresh)
-
-	// A device that was just told to restart cannot take an update request
-	// in the same breath; the next in-window reconcile will.
-	if !rebooted {
-		r.updateIfAvailable(ctx, c, &dev, profile, sys)
-	}
+	r.rebootIfRequested(ctx, c, &dev, profile, sys.restartRequired, sys.fresh)
 
 	if len(findings) == 0 {
 		return r.finish(ctx, &dev, metav1.ConditionTrue, shellyv1alpha1.ReasonInSync,
@@ -541,12 +543,12 @@ type sysRead struct {
 func (r *ShellyDeviceReconciler) rebootIfRequested(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice, profile *shellyv1alpha1.ShellyProfile,
 	restartRequired, sysStatusFresh bool,
-) (rebooted bool) {
+) {
 	if profile == nil || !profile.Spec.RebootWhenRequired || profile.Spec.Mode != shellyv1alpha1.ModeEnforce {
-		return false
+		return
 	}
 	if !sysStatusFresh || !restartRequired {
-		return false
+		return
 	}
 	ok, err := withinRebootWindow(time.Now(), profile.Spec.RebootWindow)
 	if err != nil {
@@ -557,10 +559,10 @@ func (r *ShellyDeviceReconciler) rebootIfRequested(
 			r.Recorder.Event(dev, corev1.EventTypeWarning, "RebootWindowInvalid",
 				fmt.Sprintf("not rebooting: %v", err))
 		}
-		return false
+		return
 	}
 	if !ok {
-		return false
+		return
 	}
 	if err := c.Reboot(ctx); err != nil {
 		// The device drops the connection as it restarts, so a transport
@@ -570,8 +572,7 @@ func (r *ShellyDeviceReconciler) rebootIfRequested(
 			r.Recorder.Event(dev, corev1.EventTypeWarning, "RebootFailed",
 				fmt.Sprintf("reboot requested but the call did not complete cleanly: %v", err))
 		}
-		// Possibly restarting; treat as rebooted so nothing else is sent.
-		return true
+		return
 	}
 	if r.Recorder != nil {
 		r.Recorder.Event(dev, corev1.EventTypeNormal, "Rebooted",
@@ -582,7 +583,6 @@ func (r *ShellyDeviceReconciler) rebootIfRequested(
 	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err != nil {
 		dev.Status.RestartRequired = base.Status.RestartRequired
 	}
-	return true
 }
 
 // withWarnings appends non-fatal warnings to a condition message.

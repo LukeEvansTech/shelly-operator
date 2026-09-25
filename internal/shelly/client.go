@@ -69,6 +69,26 @@ type AuthError struct{ Host string }
 
 func (e *AuthError) Error() string { return "shelly: authentication failed for " + e.Host }
 
+// StatusError is a non-200, non-401 HTTP answer, e.g. 429 when the device's
+// digest nonce buffer is exhausted. Like RPCError it means the device heard
+// the request and did not act on it.
+type StatusError struct {
+	Status string
+	Body   string
+}
+
+func (e *StatusError) Error() string { return "status " + e.Status + ": " + e.Body }
+
+// IsRefusal reports whether err is a definite "the device did not act":
+// an RPC error, an auth failure or an HTTP status. A transport error is not
+// one -- the request may have been carried out and only the answer lost.
+func IsRefusal(err error) bool {
+	var rpcErr *RPCError
+	var authErr *AuthError
+	var statusErr *StatusError
+	return errors.As(err, &rpcErr) || errors.As(err, &authErr) || errors.As(err, &statusErr)
+}
+
 type rpcRequest struct {
 	ID     int64  `json:"id"`
 	Method string `json:"method"`
@@ -101,7 +121,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("shelly: %s %s: status %s: %s", method, c.host, resp.Status, body)
+		return fmt.Errorf("shelly: %s %s: %w", method, c.host, &StatusError{Status: resp.Status, Body: string(body)})
 	}
 	var rr rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {

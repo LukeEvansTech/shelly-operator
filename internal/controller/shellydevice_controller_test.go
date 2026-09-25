@@ -2475,8 +2475,8 @@ func TestUpdateRefusalRecordedOnStatus(t *testing.T) {
 	r, _ := newReconciler()
 	dev := reconcile(t, r, ns, "aabbccddee98")
 	a := dev.Status.LastFirmwareUpdate
-	if a == nil || !strings.Contains(a.Error, "No update info") {
-		t.Fatalf("lastFirmwareUpdate = %+v, want the device's -114 refusal recorded", a)
+	if a == nil || !strings.Contains(a.Error, "No update info") || !a.Refused {
+		t.Fatalf("lastFirmwareUpdate = %+v, want the device's -114 refusal recorded as refused", a)
 	}
 }
 
@@ -2621,5 +2621,53 @@ func TestUpdateSpacingSurvivesRestart(t *testing.T) {
 	_ = reconcile(t, r, ns, "aabbccddee90")
 	if updateCalls(fake) != 0 {
 		t.Error("a restarted operator ignored an update started 30s earlier on another device")
+	}
+}
+
+// A lost answer is not a refusal: the device may be flashing, so it must be
+// recorded as unrefused and the next reconcile must leave it alone.
+func TestUpdateTransportFailureHoldsDevice(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9h", "AABBCCDDEE9B")
+	fake.UpdateDropConnection = true
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE9B", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee9b")
+	a := dev.Status.LastFirmwareUpdate
+	if a == nil || a.Error == "" || a.Refused {
+		t.Fatalf("lastFirmwareUpdate = %+v, want an error recorded but NOT as a refusal", a)
+	}
+	before := len(fake.RecordedCalls())
+	_ = reconcile(t, r, ns, "aabbccddee9b")
+	if after := len(fake.RecordedCalls()); after != before {
+		t.Errorf("device got %d more calls after an ambiguous update, want 0", after-before)
+	}
+}
+
+// The update goes out before config enforcement and stops the cycle, so a
+// device whose config is drifting (or will never converge) still gets it,
+// and no config write lands on a device that may be flashing.
+func TestUpdateRunsBeforeEnforcement(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9i", "AABBCCDDEE9C")
+	fake.InitialConfig = map[string]map[string]any{"sys": {"device": map[string]any{"eco_mode": false}}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE9C", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour)) // wants eco_mode true
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee9c")
+	if updateCalls(fake) != 1 {
+		t.Fatalf("Shelly.Update calls = %d, want 1 despite config drift", updateCalls(fake))
+	}
+	for _, c := range fake.RecordedCalls() {
+		if strings.HasSuffix(c.Method, ".SetConfig") {
+			t.Errorf("wrote %s in the same cycle as a firmware update", c.Method)
+		}
 	}
 }

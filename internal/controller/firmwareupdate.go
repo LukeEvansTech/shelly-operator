@@ -19,6 +19,9 @@ import (
 // without this every in-window reconcile would re-send the request mid-flash.
 const updateSettle = 20 * time.Minute
 
+// updateIfAvailable reports whether it sent an update the device may now be
+// installing; Reconcile then stops touching the device for this cycle.
+//
 // updateIfAvailable installs a pending stable firmware update when the matched
 // profile opted in (updateWhenAvailable), in enforce mode, inside its
 // updateWindow.
@@ -38,17 +41,17 @@ const updateSettle = 20 * time.Minute
 func (r *ShellyDeviceReconciler) updateIfAvailable(
 	ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice,
 	profile *shellyv1alpha1.ShellyProfile, sys sysRead,
-) {
+) (sent bool) {
 	if profile == nil || !profile.Spec.UpdateWhenAvailable || profile.Spec.Mode != shellyv1alpha1.ModeEnforce {
-		return
+		return false
 	}
 	if !sys.fresh || sys.availableFirmware == "" {
-		return
+		return false
 	}
 	if profile.Spec.UpdateWindow == nil {
 		// The CRD rejects this; defence for objects written around it. No
 		// window must never mean "any time".
-		return
+		return false
 	}
 	ok, err := withinRebootWindow(time.Now(), profile.Spec.UpdateWindow)
 	if err != nil {
@@ -56,38 +59,53 @@ func (r *ShellyDeviceReconciler) updateIfAvailable(
 			r.Recorder.Event(dev, corev1.EventTypeWarning, "UpdateWindowInvalid",
 				fmt.Sprintf("not updating firmware: %v", err))
 		}
-		return
+		return false
 	}
 	if !ok {
-		return
+		return false
 	}
-	if last := dev.Status.LastFirmwareUpdate; last != nil && last.Error == "" &&
+	if last := dev.Status.LastFirmwareUpdate; last != nil && !last.Refused &&
 		last.Target == sys.availableFirmware && time.Since(last.Time.Time) < updateSettle {
-		return
+		return false
 	}
 	if !r.claimUpdateSlot(ctx, dev.Namespace) {
-		return
+		return false
 	}
 
+	// Persist the attempt BEFORE the call, so the slot and the settle gate
+	// hold even if this process dies between the device accepting and the
+	// answer being recorded. If it cannot be persisted, do not send.
 	from := dev.Status.Firmware
-	callErr := c.Update(ctx, "stable")
 	attempt := &shellyv1alpha1.FirmwareUpdateAttempt{
 		Time:   metav1.Now(),
 		From:   from,
 		Target: sys.availableFirmware,
 	}
-	if callErr != nil {
-		attempt.Error = callErr.Error()
-		if r.Recorder != nil {
-			r.Recorder.Event(dev, corev1.EventTypeWarning, "FirmwareUpdateFailed",
-				fmt.Sprintf("Shelly.Update to %s refused: %v", sys.availableFirmware, callErr))
-		}
-	} else if r.Recorder != nil {
-		r.Recorder.Event(dev, corev1.EventTypeNormal, "FirmwareUpdateStarted",
-			fmt.Sprintf("requested stable firmware %s (running %s)", sys.availableFirmware, from))
+	if !r.recordUpdateAttempt(ctx, dev, attempt) {
+		return false
 	}
 
-	r.recordUpdateAttempt(ctx, dev, attempt)
+	callErr := c.Update(ctx, "stable")
+	if callErr == nil {
+		if r.Recorder != nil {
+			r.Recorder.Event(dev, corev1.EventTypeNormal, "FirmwareUpdateStarted",
+				fmt.Sprintf("requested stable firmware %s (running %s)", sys.availableFirmware, from))
+		}
+		return true
+	}
+	done := attempt.DeepCopy()
+	done.Error = callErr.Error()
+	done.Refused = shelly.IsRefusal(callErr)
+	if r.Recorder != nil {
+		msg := fmt.Sprintf("Shelly.Update to %s refused: %v", sys.availableFirmware, callErr)
+		if !done.Refused {
+			msg = fmt.Sprintf("Shelly.Update to %s did not answer cleanly; it may be installing: %v",
+				sys.availableFirmware, callErr)
+		}
+		r.Recorder.Event(dev, corev1.EventTypeWarning, "FirmwareUpdateFailed", msg)
+	}
+	r.recordUpdateAttempt(ctx, dev, done)
+	return !done.Refused
 }
 
 // recordUpdateAttempt persists the attempt, retrying once on a fresh copy.
@@ -96,25 +114,26 @@ func (r *ShellyDeviceReconciler) updateIfAvailable(
 // Shelly.Update sent to a device that is mid-flash.
 func (r *ShellyDeviceReconciler) recordUpdateAttempt(
 	ctx context.Context, dev *shellyv1alpha1.ShellyDevice, attempt *shellyv1alpha1.FirmwareUpdateAttempt,
-) {
+) bool {
 	base := dev.DeepCopy()
 	dev.Status.LastFirmwareUpdate = attempt
 	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err == nil {
-		return
+		return true
 	}
 	var fresh shellyv1alpha1.ShellyDevice
 	if err := r.Get(ctx, client.ObjectKeyFromObject(dev), &fresh); err == nil {
 		freshBase := fresh.DeepCopy()
 		fresh.Status.LastFirmwareUpdate = attempt
 		if err := r.Status().Patch(ctx, &fresh, client.MergeFrom(freshBase)); err == nil {
-			return
+			return true
 		}
 	}
 	if r.Recorder != nil {
 		r.Recorder.Event(dev, corev1.EventTypeWarning, "FirmwareUpdateNotRecorded",
-			"could not persist status.lastFirmwareUpdate; the next reconcile may repeat the request")
+			"could not persist status.lastFirmwareUpdate")
 	}
 	dev.Status.LastFirmwareUpdate = base.Status.LastFirmwareUpdate
+	return false
 }
 
 // updateInFlight reports whether the device accepted an update recently and
@@ -124,7 +143,7 @@ func (r *ShellyDeviceReconciler) recordUpdateAttempt(
 // different firmware, or after updateSettle if the install never happened.
 func updateInFlight(dev *shellyv1alpha1.ShellyDevice, now time.Time) (bool, time.Duration) {
 	last := dev.Status.LastFirmwareUpdate
-	if last == nil || last.Error != "" || dev.Status.Firmware != last.From {
+	if last == nil || last.Refused || dev.Status.Firmware != last.From {
 		return false, 0
 	}
 	remaining := updateSettle - now.Sub(last.Time.Time)

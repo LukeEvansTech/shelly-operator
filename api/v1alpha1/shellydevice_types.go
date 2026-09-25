@@ -52,12 +52,20 @@ type FirmwareUpdateAttempt struct {
 	// Target is the stable version the device reported as available.
 	Target string `json:"target"`
 
-	// Error is the device's answer when it refused, e.g. "-114: Resource
-	// unavailable: No update info!". Empty means the device accepted the
-	// request; whether it then installed shows up as status.firmware
-	// changing and status.availableFirmware clearing.
+	// Error is set when the call did not come back clean: the device's
+	// refusal (e.g. "-114: Resource unavailable: No update info!") or a
+	// transport failure. Empty means accepted, or still being sent. Whether
+	// the device then installed shows up as status.firmware changing and
+	// status.availableFirmware clearing.
 	// +optional
 	Error string `json:"error,omitempty"`
+
+	// Refused is true only when the device definitely did not act: an RPC
+	// error, an auth failure or an HTTP status such as 429. A transport
+	// error leaves it false, because the device may have accepted the
+	// request and be flashing, so the operator keeps it quiet all the same.
+	// +optional
+	Refused bool `json:"refused,omitempty"`
 }
 
 // ShellyDeviceStatus is owned by the operator: discovery records identity

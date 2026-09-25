@@ -60,6 +60,17 @@ switch output follows its `initial_state` -- with `initial_state: off`
 the load stays off until something turns it back on. Consider managing
 `spec.config.switch.initialState: restore_last` alongside auto-update.
 
+The on-device job fails silently: when its update check comes back empty
+it does nothing and records nothing, and a fleet has sat a release behind
+for days with every job enabled and correct. `spec.updateWhenAvailable:
+true` (enforce mode only) has the operator install a pending stable update
+itself, by calling `Shelly.Update`, inside `spec.updateWindow` (required;
+same shape as `rebootWindow`). At most one device starts per
+`--firmware-update-spacing` (default 2m) fleet-wide, so the fleet never
+fetches the image in the same second. The device's answer, including a
+refusal such as `-114 No update info`, is kept in
+`status.lastFirmwareUpdate`. Keep `autoUpdate` on as the fallback.
+
 ### Device UI (LED ring, night mode, button)
 
 `spec.config.ui` manages a plug's LED ring and physical button on models

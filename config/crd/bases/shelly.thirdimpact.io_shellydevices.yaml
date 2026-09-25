@@ -194,6 +194,36 @@ spec:
                 description: Gen is the Shelly RPC API generation (2, 3, or 4).
                 format: int32
                 type: integer
+              lastFirmwareUpdate:
+                description: |-
+                  LastFirmwareUpdate records the most recent firmware update the
+                  operator started on this device (profile updateWhenAvailable). It is
+                  kept on status, not only as an Event, because Events expire within the
+                  hour and a failed overnight update needs to be readable the next day.
+                properties:
+                  error:
+                    description: |-
+                      Error is the device's answer when it refused, e.g. "-114: Resource
+                      unavailable: No update info!". Empty means the device accepted the
+                      request; whether it then installed shows up as status.firmware
+                      changing and status.availableFirmware clearing.
+                    type: string
+                  from:
+                    description: From is the firmware the device was running when
+                      asked.
+                    type: string
+                  target:
+                    description: Target is the stable version the device reported
+                      as available.
+                    type: string
+                  time:
+                    description: Time the update was requested.
+                    format: date-time
+                    type: string
+                required:
+                - target
+                - time
+                type: object
               lastSeen:
                 description: LastSeen is when the device last answered a probe.
                 format: date-time

@@ -83,6 +83,12 @@ type Device struct {
 	// Shelly.Reboot clears it here too.
 	RestartRequired bool
 
+	// UpdateError, when non-empty, fails Shelly.Update with code -114 and
+	// this message (simulates a device whose update check came back empty).
+	// Otherwise Shelly.Update succeeds and clears AvailableUpdates, as a
+	// completed install would.
+	UpdateError string
+
 	mu             sync.Mutex
 	ha1            string
 	config         map[string]map[string]any // component ("sys", "switch:0") -> config
@@ -218,6 +224,8 @@ func (d *Device) handleRPC(w http.ResponseWriter, r *http.Request) {
 		d.handleSysGetStatus(w, req.ID)
 	case req.Method == "Shelly.Reboot":
 		d.handleReboot(w, req.ID)
+	case req.Method == "Shelly.Update":
+		d.handleUpdate(w, req.ID)
 	case req.Method == "Schedule.List":
 		d.handleScheduleList(w, req.ID)
 	case req.Method == "Schedule.Create":
@@ -281,6 +289,17 @@ func (d *Device) handleSysGetStatus(w http.ResponseWriter, id int64) {
 func (d *Device) handleReboot(w http.ResponseWriter, id int64) {
 	d.RestartRequired = false
 	writeJSON(w, rpcResult(id, map[string]any{}))
+}
+
+// handleUpdate models an install that completes instantly: the pending
+// update is gone afterwards, so a second reconcile has nothing to install.
+func (d *Device) handleUpdate(w http.ResponseWriter, id int64) {
+	if d.UpdateError != "" {
+		writeJSON(w, rpcError(id, -114, d.UpdateError))
+		return
+	}
+	d.AvailableUpdates = nil
+	writeJSON(w, rpcResult(id, nil))
 }
 
 func (d *Device) handleScheduleList(w http.ResponseWriter, id int64) {

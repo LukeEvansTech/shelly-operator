@@ -2563,3 +2563,63 @@ func TestUpdateSpacingIsFleetWide(t *testing.T) {
 		t.Errorf("update calls = %d + %d, want exactly one inside the spacing", updateCalls(a), updateCalls(b))
 	}
 }
+
+// While an accepted update is installing, the reconcile must not touch the
+// device at all -- not even the config read, and certainly not a reboot.
+func TestNoDeviceCallsWhileUpdateInFlight(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9e", "AABBCCDDEE9E")
+	fake.RestartRequired = true
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	d := createDevice(t, ns, "AABBCCDDEE9E", hostOf(srv.URL), true, false, "")
+	d.Status.Firmware = "old"
+	d.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{
+		Time: metav1.NewTime(time.Now().Add(-2 * time.Minute)), From: "old", Target: "2.0.1",
+	}
+	if err := k8sClient.Status().Update(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector:           &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:               shellyv1alpha1.ModeEnforce,
+			RebootWhenRequired: true, // would reboot, and eco_mode would be written, were the gate absent
+			Config:             shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: new(false)}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee9e")
+	if calls := fake.RecordedCalls(); len(calls) != 0 {
+		t.Errorf("device received %d RPC calls while its update was installing, want 0 (first: %s)", len(calls), calls[0].Method)
+	}
+}
+
+// A recent attempt persisted on ANY device holds the slot, so a restarted
+// operator (fresh in-memory state) cannot start a second update at once.
+func TestUpdateSpacingSurvivesRestart(t *testing.T) {
+	ns := newNamespace(t)
+	other := createDevice(t, ns, "AABBCCDDEE9F", "127.0.0.1:1", false, false, "")
+	other.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{
+		Time: metav1.NewTime(time.Now().Add(-30 * time.Second)), Target: "2.0.1",
+	}
+	if err := k8sClient.Status().Update(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	fake := pendingUpdateDevice("dev9g", "AABBCCDDEE90")
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE90", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler() // fresh reconciler: no in-memory slot
+	_ = reconcile(t, r, ns, "aabbccddee90")
+	if updateCalls(fake) != 0 {
+		t.Error("a restarted operator ignored an update started 30s earlier on another device")
+	}
+}

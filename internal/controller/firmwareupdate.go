@@ -65,7 +65,7 @@ func (r *ShellyDeviceReconciler) updateIfAvailable(
 		last.Target == sys.availableFirmware && time.Since(last.Time.Time) < updateSettle {
 		return
 	}
-	if !r.claimUpdateSlot() {
+	if !r.claimUpdateSlot(ctx, dev.Namespace) {
 		return
 	}
 
@@ -87,25 +87,79 @@ func (r *ShellyDeviceReconciler) updateIfAvailable(
 			fmt.Sprintf("requested stable firmware %s (running %s)", sys.availableFirmware, from))
 	}
 
+	r.recordUpdateAttempt(ctx, dev, attempt)
+}
+
+// recordUpdateAttempt persists the attempt, retrying once on a fresh copy.
+// It matters more than most status writes: the settle gate and the
+// fleet-wide spacing both read it back, so losing it can mean a second
+// Shelly.Update sent to a device that is mid-flash.
+func (r *ShellyDeviceReconciler) recordUpdateAttempt(
+	ctx context.Context, dev *shellyv1alpha1.ShellyDevice, attempt *shellyv1alpha1.FirmwareUpdateAttempt,
+) {
 	base := dev.DeepCopy()
 	dev.Status.LastFirmwareUpdate = attempt
-	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err != nil {
-		dev.Status.LastFirmwareUpdate = base.Status.LastFirmwareUpdate
+	if err := r.Status().Patch(ctx, dev, client.MergeFrom(base)); err == nil {
+		return
 	}
+	var fresh shellyv1alpha1.ShellyDevice
+	if err := r.Get(ctx, client.ObjectKeyFromObject(dev), &fresh); err == nil {
+		freshBase := fresh.DeepCopy()
+		fresh.Status.LastFirmwareUpdate = attempt
+		if err := r.Status().Patch(ctx, &fresh, client.MergeFrom(freshBase)); err == nil {
+			return
+		}
+	}
+	if r.Recorder != nil {
+		r.Recorder.Event(dev, corev1.EventTypeWarning, "FirmwareUpdateNotRecorded",
+			"could not persist status.lastFirmwareUpdate; the next reconcile may repeat the request")
+	}
+	dev.Status.LastFirmwareUpdate = base.Status.LastFirmwareUpdate
+}
+
+// updateInFlight reports whether the device accepted an update recently and
+// is presumably still downloading or flashing it, and if so how long to wait.
+// Reconcile checks it before touching the device at all, so no config write
+// or reboot lands mid-install. It lifts as soon as discovery reports a
+// different firmware, or after updateSettle if the install never happened.
+func updateInFlight(dev *shellyv1alpha1.ShellyDevice, now time.Time) (bool, time.Duration) {
+	last := dev.Status.LastFirmwareUpdate
+	if last == nil || last.Error != "" || dev.Status.Firmware != last.From {
+		return false, 0
+	}
+	remaining := updateSettle - now.Sub(last.Time.Time)
+	if remaining <= 0 {
+		return false, 0
+	}
+	return true, remaining
 }
 
 // claimUpdateSlot reports whether an update may start now, and if so records
 // it. The slot is claimed before the call is sent, so a slow or failing
 // device still holds it and concurrent reconciles cannot both go.
-func (r *ShellyDeviceReconciler) claimUpdateSlot() bool {
+//
+// The in-memory time covers concurrent workers in this process; the newest
+// persisted status.lastFirmwareUpdate in the namespace covers a restart or a
+// leader handover, which would otherwise reset the spacing to zero.
+func (r *ShellyDeviceReconciler) claimUpdateSlot(ctx context.Context, namespace string) bool {
 	spacing := r.UpdateSpacing
 	if spacing <= 0 {
 		spacing = 2 * time.Minute
 	}
+	var devs shellyv1alpha1.ShellyDeviceList
+	if err := r.List(ctx, &devs, client.InNamespace(namespace)); err != nil {
+		return false // cannot prove the fleet is quiet; wait for the next reconcile
+	}
 	r.updateMu.Lock()
 	defer r.updateMu.Unlock()
+	latest := r.lastUpdateStart
+	for i := range devs.Items {
+		if a := devs.Items[i].Status.LastFirmwareUpdate; a != nil && a.Time.After(latest) {
+			latest = a.Time.Time
+		}
+	}
 	now := time.Now()
-	if !r.lastUpdateStart.IsZero() && now.Sub(r.lastUpdateStart) < spacing {
+	if !latest.IsZero() && now.Sub(latest) < spacing {
 		return false
 	}
 	r.lastUpdateStart = now

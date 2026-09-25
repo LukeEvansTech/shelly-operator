@@ -107,6 +107,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonOffline,
 			"device offline; skipping drift check", nil, dev.Status.MatchedProfile)
 	}
+	// An update the operator started is still installing: send the device
+	// nothing -- no config write, no reboot -- until it settles.
+	if inFlight, wait := updateInFlight(&dev, time.Now()); inFlight {
+		return ctrl.Result{RequeueAfter: wait}, nil
+	}
 
 	var profiles shellyv1alpha1.ShellyProfileList
 	if err := r.List(ctx, &profiles, client.InNamespace(dev.Namespace)); err != nil {

@@ -2412,7 +2412,7 @@ func createUpdateProfile(t *testing.T, ns, mode string, w *shellyv1alpha1.Reboot
 func updateCalls(fake *shellytest.Device) int {
 	n := 0
 	for _, c := range fake.RecordedCalls() {
-		if c.Method == "Shelly.Update" {
+		if c.Method == rpcShellyUpdate {
 			n++
 		}
 	}
@@ -2442,7 +2442,7 @@ func TestUpdateWhenAvailableInsideWindow(t *testing.T) {
 		t.Fatalf("Shelly.Update calls = %d, want 1", updateCalls(fake))
 	}
 	for _, c := range fake.RecordedCalls() {
-		if c.Method == "Shelly.Update" && !strings.Contains(string(c.Params), `"stable"`) {
+		if c.Method == rpcShellyUpdate && !strings.Contains(string(c.Params), `"stable"`) {
 			t.Errorf("Shelly.Update params = %s, want stage stable", c.Params)
 		}
 	}

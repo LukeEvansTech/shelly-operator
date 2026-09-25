@@ -753,7 +753,10 @@ func (r *ShellyDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// refreshes from the sweeper must not re-trigger reconciles.
 			return oldDev.Status.Online != newDev.Status.Online ||
 				oldDev.Status.Address != newDev.Status.Address ||
-				oldDev.Status.AuthEnabled != newDev.Status.AuthEnabled
+				oldDev.Status.AuthEnabled != newDev.Status.AuthEnabled ||
+				// A new firmware version is how an operator-started update
+				// ends; reconcile at once instead of waiting out the settle.
+				oldDev.Status.Firmware != newDev.Status.Firmware
 		},
 	}
 	return ctrl.NewControllerManagedBy(mgr).

@@ -42,6 +42,7 @@ spec:
                    which disables the name map. */}}
             - --name-map={{ .Values.nameMap }}
             - --reconcile-interval={{ .Values.reconcileInterval }}
+            - --firmware-update-spacing={{ .Values.firmwareUpdateSpacing }}
             {{- with .Values.exporterConfigMap }}
             - --exporter-configmap={{ . }}
             {{- end }}

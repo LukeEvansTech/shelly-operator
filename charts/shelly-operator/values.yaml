@@ -26,6 +26,9 @@ deviceNamespace: ""
 nameMap: shelly-names
 # Steady-state drift check interval per device (jittered).
 reconcileInterval: 5m
+# Minimum gap between two operator-started firmware updates, fleet-wide
+# (ShellyProfile updateWhenAvailable). Each update reboots its plug.
+firmwareUpdateSpacing: 2m
 # ConfigMap the operator renders for shelly_exporter. "" disables the feed.
 exporterConfigMap: ""
 # How often the exporter polls EACH device, written into that rendered config.

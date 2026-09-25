@@ -2389,3 +2389,285 @@ func TestRebootInsideWindow(t *testing.T) {
 		t.Error("status.restartRequired should clear after the reboot")
 	}
 }
+
+// createUpdateProfile is an enforce (or observe) profile opted in to
+// operator-driven firmware updates with the given window.
+func createUpdateProfile(t *testing.T, ns, mode string, w *shellyv1alpha1.RebootWindow) {
+	t.Helper()
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector:            &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:                mode,
+			UpdateWhenAvailable: true,
+			UpdateWindow:        w,
+			Config:              shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: new(true)}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func updateCalls(fake *shellytest.Device) int {
+	n := 0
+	for _, c := range fake.RecordedCalls() {
+		if c.Method == rpcShellyUpdate {
+			n++
+		}
+	}
+	return n
+}
+
+func pendingUpdateDevice(id, mac string) *shellytest.Device {
+	return &shellytest.Device{ID: id, MAC: mac, Gen: 2,
+		AvailableUpdates: map[string]any{"stable": map[string]any{"version": "2.0.1"}},
+		InitialConfig:    map[string]map[string]any{"sys": {"device": map[string]any{"eco_mode": true}}},
+	}
+}
+
+// Opted in, enforce, window open, update pending: the operator asks for the
+// stable update and records the attempt on status.
+func TestUpdateWhenAvailableInsideWindow(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev97", "AABBCCDDEE97")
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE97", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, rec := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee97")
+	if updateCalls(fake) != 1 {
+		t.Fatalf("Shelly.Update calls = %d, want 1", updateCalls(fake))
+	}
+	for _, c := range fake.RecordedCalls() {
+		if c.Method == rpcShellyUpdate && !strings.Contains(string(c.Params), `"stable"`) {
+			t.Errorf("Shelly.Update params = %s, want stage stable", c.Params)
+		}
+	}
+	a := dev.Status.LastFirmwareUpdate
+	if a == nil || a.Target != "2.0.1" || a.Error != "" {
+		t.Fatalf("lastFirmwareUpdate = %+v, want target 2.0.1 with no error", a)
+	}
+	found := false
+	for len(rec.Events) > 0 {
+		if e := <-rec.Events; strings.Contains(e, "FirmwareUpdateStarted") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected a FirmwareUpdateStarted event")
+	}
+}
+
+// A refusal must be kept on status: the silent on-device failure is the
+// reason this feature exists.
+func TestUpdateRefusalRecordedOnStatus(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev98", "AABBCCDDEE98")
+	fake.UpdateError = "Resource unavailable: No update info!"
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE98", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee98")
+	a := dev.Status.LastFirmwareUpdate
+	if a == nil || !strings.Contains(a.Error, "No update info") || !a.Refused {
+		t.Fatalf("lastFirmwareUpdate = %+v, want the device's -114 refusal recorded as refused", a)
+	}
+}
+
+func TestNoUpdateOutsideWindow(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev99", "AABBCCDDEE99")
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE99", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(3*time.Hour, 4*time.Hour))
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee99")
+	if updateCalls(fake) != 0 {
+		t.Error("updated firmware outside the profile's update window")
+	}
+}
+
+func TestNoUpdateInObserveMode(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9a", "AABBCCDDEE9A")
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE9A", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeObserve, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee9a")
+	if updateCalls(fake) != 0 {
+		t.Error("observe mode must never update firmware")
+	}
+}
+
+func TestNoUpdateWhenNothingPending(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9b", "AABBCCDDEE9B")
+	fake.AvailableUpdates = nil
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE9B", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee9b")
+	if updateCalls(fake) != 0 || dev.Status.LastFirmwareUpdate != nil {
+		t.Error("must not request an update the device is not offering")
+	}
+}
+
+// The API server must refuse updateWhenAvailable without a window, so a
+// missing field can never mean "update at any hour".
+func TestUpdateWhenAvailableRequiresWindow(t *testing.T) {
+	ns := newNamespace(t)
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Mode:                shellyv1alpha1.ModeEnforce,
+			UpdateWhenAvailable: true,
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err == nil {
+		t.Fatal("a profile with updateWhenAvailable and no updateWindow should be rejected")
+	}
+}
+
+// Two devices due at once: only the first starts, the second waits for the
+// fleet-wide spacing so the fleet never pulls the image in the same second.
+func TestUpdateSpacingIsFleetWide(t *testing.T) {
+	ns := newNamespace(t)
+	a := pendingUpdateDevice("dev9c", "AABBCCDDEE9C")
+	b := pendingUpdateDevice("dev9d", "AABBCCDDEE9D")
+	srvA, srvB := shellytest.New(a), shellytest.New(b)
+	defer srvA.Close()
+	defer srvB.Close()
+	createDevice(t, ns, "AABBCCDDEE9C", hostOf(srvA.URL), true, false, "")
+	createDevice(t, ns, "AABBCCDDEE9D", hostOf(srvB.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler()
+	r.UpdateSpacing = time.Hour
+	_ = reconcile(t, r, ns, "aabbccddee9c")
+	_ = reconcile(t, r, ns, "aabbccddee9d")
+	if updateCalls(a)+updateCalls(b) != 1 {
+		t.Errorf("update calls = %d + %d, want exactly one inside the spacing", updateCalls(a), updateCalls(b))
+	}
+}
+
+// While an accepted update is installing, the reconcile must not touch the
+// device at all -- not even the config read, and certainly not a reboot.
+func TestNoDeviceCallsWhileUpdateInFlight(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9e", "AABBCCDDEE9E")
+	fake.RestartRequired = true
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	d := createDevice(t, ns, "AABBCCDDEE9E", hostOf(srv.URL), true, false, "")
+	d.Status.Firmware = "old"
+	d.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{
+		Time: metav1.NewTime(time.Now().Add(-2 * time.Minute)), From: "old", Target: "2.0.1",
+	}
+	if err := k8sClient.Status().Update(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	p := &shellyv1alpha1.ShellyProfile{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "plugs"},
+		Spec: shellyv1alpha1.ShellyProfileSpec{
+			Selector:           &metav1.LabelSelector{MatchLabels: map[string]string{shellyv1alpha1.LabelApp: "PlusPlugUK"}},
+			Mode:               shellyv1alpha1.ModeEnforce,
+			RebootWhenRequired: true, // would reboot, and eco_mode would be written, were the gate absent
+			Config:             shellyv1alpha1.ProfileConfig{System: &shellyv1alpha1.SystemSection{EcoMode: new(false)}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee9e")
+	if calls := fake.RecordedCalls(); len(calls) != 0 {
+		t.Errorf("device received %d RPC calls while its update was installing, want 0 (first: %s)", len(calls), calls[0].Method)
+	}
+}
+
+// A recent attempt persisted on ANY device holds the slot, so a restarted
+// operator (fresh in-memory state) cannot start a second update at once.
+func TestUpdateSpacingSurvivesRestart(t *testing.T) {
+	ns := newNamespace(t)
+	other := createDevice(t, ns, "AABBCCDDEE9F", "127.0.0.1:1", false, false, "")
+	other.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{
+		Time: metav1.NewTime(time.Now().Add(-30 * time.Second)), Target: "2.0.1",
+	}
+	if err := k8sClient.Status().Update(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	fake := pendingUpdateDevice("dev9g", "AABBCCDDEE90")
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE90", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler() // fresh reconciler: no in-memory slot
+	_ = reconcile(t, r, ns, "aabbccddee90")
+	if updateCalls(fake) != 0 {
+		t.Error("a restarted operator ignored an update started 30s earlier on another device")
+	}
+}
+
+// A lost answer is not a refusal: the device may be flashing, so it must be
+// recorded as unrefused and the next reconcile must leave it alone.
+func TestUpdateTransportFailureHoldsDevice(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9h", "AABBCCDDEE9B")
+	fake.UpdateDropConnection = true
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE9B", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour))
+
+	r, _ := newReconciler()
+	dev := reconcile(t, r, ns, "aabbccddee9b")
+	a := dev.Status.LastFirmwareUpdate
+	if a == nil || a.Error == "" || a.Refused {
+		t.Fatalf("lastFirmwareUpdate = %+v, want an error recorded but NOT as a refusal", a)
+	}
+	before := len(fake.RecordedCalls())
+	_ = reconcile(t, r, ns, "aabbccddee9b")
+	if after := len(fake.RecordedCalls()); after != before {
+		t.Errorf("device got %d more calls after an ambiguous update, want 0", after-before)
+	}
+}
+
+// The update goes out before config enforcement and stops the cycle, so a
+// device whose config is drifting (or will never converge) still gets it,
+// and no config write lands on a device that may be flashing.
+func TestUpdateRunsBeforeEnforcement(t *testing.T) {
+	ns := newNamespace(t)
+	fake := pendingUpdateDevice("dev9i", "AABBCCDDEE9C")
+	fake.InitialConfig = map[string]map[string]any{"sys": {"device": map[string]any{"eco_mode": false}}}
+	srv := shellytest.New(fake)
+	defer srv.Close()
+	createDevice(t, ns, "AABBCCDDEE9C", hostOf(srv.URL), true, false, "")
+	createUpdateProfile(t, ns, shellyv1alpha1.ModeEnforce, windowAround(-1*time.Hour, 1*time.Hour)) // wants eco_mode true
+
+	r, _ := newReconciler()
+	_ = reconcile(t, r, ns, "aabbccddee9c")
+	if updateCalls(fake) != 1 {
+		t.Fatalf("Shelly.Update calls = %d, want 1 despite config drift", updateCalls(fake))
+	}
+	for _, c := range fake.RecordedCalls() {
+		if strings.HasSuffix(c.Method, ".SetConfig") {
+			t.Errorf("wrote %s in the same cycle as a firmware update", c.Method)
+		}
+	}
+}

@@ -31,6 +31,7 @@ const (
 )
 
 // ShellyProfileSpec declares desired configuration for a set of devices.
+// +kubebuilder:validation:XValidation:rule="!has(self.updateWhenAvailable) || self.updateWhenAvailable == false || has(self.updateWindow)",message="updateWindow is required when updateWhenAvailable is true"
 type ShellyProfileSpec struct {
 	// Selector matches ShellyDevices by their discovery labels
 	// (shelly.thirdimpact.io/model, /app, /gen). A nil selector matches no
@@ -86,6 +87,34 @@ type ShellyProfileSpec struct {
 	// Ignored unless rebootWhenRequired is set.
 	// +optional
 	RebootWindow *RebootWindow `json:"rebootWindow,omitempty"`
+
+	// UpdateWhenAvailable lets the operator install a pending STABLE
+	// firmware update itself, by calling Shelly.Update on the device, inside
+	// updateWindow. Default false.
+	//
+	// This exists because the device's own 00:00 auto-update job
+	// (config.firmware.autoUpdate) fails silently: it has left most of a
+	// fleet on the previous release for days while the update sat
+	// available, with the job enabled and correct, and nothing on the device
+	// records why. An update the operator starts has a caller that sees the
+	// answer, so a failure lands on status.lastFirmwareUpdate instead of
+	// vanishing. Keep autoUpdate on alongside it as the fallback.
+	//
+	// Updates are spread out: at most one device starts an update per
+	// --firmware-update-spacing, fleet-wide. A firmware update reboots the
+	// device, so the same load caveats as rebootWhenRequired apply.
+	//
+	// Ignored in observe mode.
+	// +kubebuilder:default=false
+	// +optional
+	UpdateWhenAvailable bool `json:"updateWhenAvailable,omitempty"`
+
+	// UpdateWindow is the daily window in which updateWhenAvailable may
+	// start an update. Required when updateWhenAvailable is set: unlike a
+	// pending restart, nothing about a firmware update is urgent enough to
+	// justify "whenever a reconcile notices".
+	// +optional
+	UpdateWindow *RebootWindow `json:"updateWindow,omitempty"`
 }
 
 // RebootWindow is a daily local-time window in which reboots may happen.

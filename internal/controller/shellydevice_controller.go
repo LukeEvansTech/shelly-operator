@@ -69,6 +69,15 @@ type ShellyDeviceReconciler struct {
 	// Interval is the steady-state requeue (jittered, +/-10%); default 5m.
 	Interval time.Duration
 
+	// UpdateSpacing is the minimum gap between two operator-initiated
+	// firmware updates anywhere in the fleet; default 2m. See updateIfAvailable.
+	UpdateSpacing time.Duration
+
+	// updateMu guards lastUpdateStart.
+	updateMu sync.Mutex
+	// lastUpdateStart is when the most recent Shelly.Update was sent.
+	lastUpdateStart time.Time
+
 	// clientMu guards clients.
 	clientMu sync.Mutex
 	// clients caches one RPC client per device address so its digest nonce
@@ -97,6 +106,11 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if !dev.Status.Online {
 		return r.finish(ctx, &dev, metav1.ConditionUnknown, shellyv1alpha1.ReasonOffline,
 			"device offline; skipping drift check", nil, dev.Status.MatchedProfile)
+	}
+	// An update the operator started is still installing: send the device
+	// nothing -- no config write, no reboot -- until it settles.
+	if inFlight, wait := updateInFlight(&dev, time.Now()); inFlight {
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 
 	var profiles shellyv1alpha1.ShellyProfileList
@@ -165,7 +179,15 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// (and nonce) we already hold. The discovery sweeper cannot do this:
 	// Sys.GetStatus goes through POST /rpc and it has no credentials, so on
 	// an auth-enabled device its read could only 401.
-	sysRestartRequired, sysStatusFresh := r.stampSysStatus(ctx, c, &dev)
+	sys := r.stampSysStatus(ctx, c, &dev)
+
+	// Firmware first, independent of config convergence: a device whose
+	// config will not converge (NotConverging damping returns early below)
+	// still gets its update, and that update may be the fix. Once a request
+	// is out, send nothing else this cycle -- the device may be flashing.
+	if r.updateIfAvailable(ctx, c, &dev, profile, sys) {
+		return ctrl.Result{RequeueAfter: updateSettle}, nil
+	}
 
 	desired := drift.Render(profile.Spec.Config, desiredName, actual)
 	findings, err := drift.Diff(desired, actual)
@@ -202,7 +224,7 @@ func (r *ShellyDeviceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// reconcile, once the device itself confirms it. Gated on sysStatusFresh
 	// so a failed Sys.GetStatus this cycle can never make a stale cached
 	// RestartRequired trigger a reboot.
-	r.rebootIfRequested(ctx, c, &dev, profile, sysRestartRequired, sysStatusFresh)
+	r.rebootIfRequested(ctx, c, &dev, profile, sys.restartRequired, sys.fresh)
 
 	if len(findings) == 0 {
 		return r.finish(ctx, &dev, metav1.ConditionTrue, shellyv1alpha1.ReasonInSync,
@@ -464,23 +486,24 @@ func registryOwnedLabels(dev *shellyv1alpha1.ShellyDevice) []string {
 // steady-state fleet costs no API traffic. Called with the reconcile's
 // authenticated client so it rides the nonce already in hand.
 //
-// Returns the device's own restartRequired from THIS cycle's read, plus
-// whether that read actually succeeded. rebootIfRequested must gate on the
+// Returns THIS cycle's read (restartRequired, availableFirmware) plus whether
+// that read actually succeeded. rebootIfRequested must gate on the
 // latter rather than on dev.Status.RestartRequired: that field can still
 // hold a stale value here even on a successful read, because a failed
 // Status().Patch below rolls it back to the pre-read (base) value to keep
 // the in-memory object consistent with what is actually persisted.
-func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) (restartRequired, fresh bool) {
+func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.Client, dev *shellyv1alpha1.ShellyDevice) sysRead {
 	st, err := c.GetSysStatus(ctx)
 	if err != nil {
-		return false, false
+		return sysRead{}
 	}
 	wantFW := ""
 	if st.AvailableUpdates.Stable != nil {
 		wantFW = st.AvailableUpdates.Stable.Version
 	}
+	read := sysRead{restartRequired: st.RestartRequired, availableFirmware: wantFW, fresh: true}
 	if dev.Status.AvailableFirmware == wantFW && dev.Status.RestartRequired == st.RestartRequired {
-		return st.RestartRequired, true
+		return read
 	}
 	base := dev.DeepCopy()
 	dev.Status.AvailableFirmware = wantFW
@@ -490,7 +513,15 @@ func (r *ShellyDeviceReconciler) stampSysStatus(ctx context.Context, c *shelly.C
 		dev.Status.AvailableFirmware = base.Status.AvailableFirmware
 		dev.Status.RestartRequired = base.Status.RestartRequired
 	}
-	return st.RestartRequired, true
+	return read
+}
+
+// sysRead is one cycle's Sys.GetStatus result. fresh is false when the read
+// failed, in which case the other fields are zero and must not be acted on.
+type sysRead struct {
+	restartRequired   bool
+	availableFirmware string
+	fresh             bool
 }
 
 // rebootIfRequested reboots the device when it is asking for a restart and the
@@ -722,7 +753,10 @@ func (r *ShellyDeviceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// refreshes from the sweeper must not re-trigger reconciles.
 			return oldDev.Status.Online != newDev.Status.Online ||
 				oldDev.Status.Address != newDev.Status.Address ||
-				oldDev.Status.AuthEnabled != newDev.Status.AuthEnabled
+				oldDev.Status.AuthEnabled != newDev.Status.AuthEnabled ||
+				// A new firmware version is how an operator-started update
+				// ends; reconcile at once instead of waiting out the settle.
+				oldDev.Status.Firmware != newDev.Status.Firmware
 		},
 	}
 	return ctrl.NewControllerManagedBy(mgr).

@@ -104,6 +104,9 @@ func main() {
 		"ConfigMap holding per-device inventory metadata (name/room/type/note) keyed by lowercased MAC. Empty disables.")
 	flag.DurationVar(&reconcileInterval, "reconcile-interval", 5*time.Minute,
 		"Steady-state drift check interval per device (jittered).")
+	var firmwareUpdateSpacing time.Duration
+	flag.DurationVar(&firmwareUpdateSpacing, "firmware-update-spacing", 2*time.Minute,
+		"Minimum gap between two operator-initiated firmware updates, fleet-wide (profile updateWhenAvailable).")
 	var exporterConfigMap string
 	flag.StringVar(&exporterConfigMap, "exporter-configmap", "",
 		"ConfigMap (in --device-namespace) to maintain with shelly_exporter's config.yaml. Empty disables the feed.")
@@ -241,11 +244,12 @@ func main() {
 		// (events.k8s.io API), but migrating changes the recorder interface
 		// (no Event method, requires an action field) across the controller
 		// and its test fakes. Deferred; see issue tracker.
-		Recorder:     mgr.GetEventRecorderFor("shellydevice-controller"), //nolint:staticcheck
-		Reader:       mgr.GetAPIReader(),
-		NameMapName:  nameMapName,
-		RegistryName: registryName,
-		Interval:     reconcileInterval,
+		Recorder:      mgr.GetEventRecorderFor("shellydevice-controller"), //nolint:staticcheck
+		Reader:        mgr.GetAPIReader(),
+		NameMapName:   nameMapName,
+		RegistryName:  registryName,
+		Interval:      reconcileInterval,
+		UpdateSpacing: firmwareUpdateSpacing,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ShellyDevice")
 		os.Exit(1)

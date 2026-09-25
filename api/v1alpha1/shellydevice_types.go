@@ -40,6 +40,34 @@ type ShellyDeviceSpec struct {
 	ProfileRef string `json:"profileRef,omitempty"`
 }
 
+// FirmwareUpdateAttempt is one operator-initiated Shelly.Update call.
+type FirmwareUpdateAttempt struct {
+	// Time the update was requested.
+	Time metav1.Time `json:"time"`
+
+	// From is the firmware the device was running when asked.
+	// +optional
+	From string `json:"from,omitempty"`
+
+	// Target is the stable version the device reported as available.
+	Target string `json:"target"`
+
+	// Error is set when the call did not come back clean: the device's
+	// refusal (e.g. "-114: Resource unavailable: No update info!") or a
+	// transport failure. Empty means accepted, or still being sent. Whether
+	// the device then installed shows up as status.firmware changing and
+	// status.availableFirmware clearing.
+	// +optional
+	Error string `json:"error,omitempty"`
+
+	// Refused is true only when the device definitely did not act: an RPC
+	// error, an auth failure or an HTTP status such as 429. A transport
+	// error leaves it false, because the device may have accepted the
+	// request and be flashing, so the operator keeps it quiet all the same.
+	// +optional
+	Refused bool `json:"refused,omitempty"`
+}
+
 // ShellyDeviceStatus is owned by the operator: discovery records identity
 // and reachability here.
 type ShellyDeviceStatus struct {
@@ -94,6 +122,13 @@ type ShellyDeviceStatus struct {
 	// expire long before anyone reboots the device.
 	// +optional
 	RestartRequired bool `json:"restartRequired,omitempty"`
+
+	// LastFirmwareUpdate records the most recent firmware update the
+	// operator started on this device (profile updateWhenAvailable). It is
+	// kept on status, not only as an Event, because Events expire within the
+	// hour and a failed overnight update needs to be readable the next day.
+	// +optional
+	LastFirmwareUpdate *FirmwareUpdateAttempt `json:"lastFirmwareUpdate,omitempty"`
 
 	// DeviceName is the name currently configured on the device itself.
 	// +optional

@@ -332,3 +332,33 @@ shelly_device_in_sync{appliance="",mac="AABBCC001201",name="lamp",room=""} 1
 		t.Errorf("in_sync should report both healthy, proving the new metric is load-bearing:\n%v", err)
 	}
 }
+
+// A refusal counts only while its version is still pending; once installed
+// or superseded it must read 0, or the alert would never clear.
+func TestDeviceCollector_FirmwareUpdateRefused(t *testing.T) {
+	refused := makeDevice("aabbcc001300", "AABBCC001300", "stuck", true, metav1.ConditionTrue, "")
+	refused.Status.AvailableFirmware = "2.0.1"
+	refused.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{Target: "2.0.1", Refused: true, Error: "-114"}
+	installed := makeDevice("aabbcc001301", "AABBCC001301", "done", true, metav1.ConditionTrue, "")
+	installed.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{Target: "2.0.1", Refused: true, Error: "-114"}
+	accepted := makeDevice("aabbcc001302", "AABBCC001302", "fine", true, metav1.ConditionTrue, "")
+	accepted.Status.AvailableFirmware = "2.0.1"
+	accepted.Status.LastFirmwareUpdate = &shellyv1alpha1.FirmwareUpdateAttempt{Target: "2.0.1"}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithStatusSubresource(&shellyv1alpha1.ShellyDevice{}).
+		WithObjects(refused, installed, accepted).
+		Build()
+	col := metrics.NewDeviceCollector(fakeClient, testNamespace, "")
+
+	expected := `# HELP shelly_device_firmware_update_refused 1 if the operator's last Shelly.Update was refused and that version is still pending, 0 otherwise
+# TYPE shelly_device_firmware_update_refused gauge
+shelly_device_firmware_update_refused{appliance="",mac="AABBCC001300",name="stuck",room=""} 1
+shelly_device_firmware_update_refused{appliance="",mac="AABBCC001301",name="done",room=""} 0
+shelly_device_firmware_update_refused{appliance="",mac="AABBCC001302",name="fine",room=""} 0
+`
+	if err := testutil.CollectAndCompare(col, strings.NewReader(expected), "shelly_device_firmware_update_refused"); err != nil {
+		t.Errorf("shelly_device_firmware_update_refused mismatch:\n%v", err)
+	}
+}

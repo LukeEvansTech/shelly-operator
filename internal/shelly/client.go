@@ -16,6 +16,14 @@ import (
 // caller forgets a context deadline.
 var defaultHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
+// tooManyRequestsRetries is how many times a 429 is retried. Firmware 2.0.0
+// answered 429 while its digest nonce table was full and cleared within
+// about 5 seconds; without a retry one such answer failed a whole reconcile,
+// including the firmware update that would have fixed it.
+const tooManyRequestsRetries = 2
+
+const defaultRetryDelay = 5 * time.Second
+
 // Client talks JSON-RPC to one Shelly Gen2+ device at http://<host>/rpc.
 // Safe for concurrent use. Digest auth (SHA-256, user "admin") is handled
 // transparently when a password is configured.
@@ -23,6 +31,8 @@ type Client struct {
 	host     string
 	hc       *http.Client
 	password string
+
+	retryDelay time.Duration // wait before retrying a 429
 
 	mu   sync.Mutex
 	auth *digestState // non-nil once a challenge has been answered
@@ -43,6 +53,9 @@ func WithHTTPClient(hc *http.Client) Option {
 		}
 	}
 }
+
+// WithRetryDelay overrides the wait before a 429 is retried (default 5s).
+func WithRetryDelay(d time.Duration) Option { return func(c *Client) { c.retryDelay = d } }
 
 // NewClient creates a client for a device host ("10.32.8.38" or "host:port").
 func NewClient(host string, opts ...Option) *Client {
@@ -107,7 +120,7 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 	if err != nil {
 		return err
 	}
-	resp, err := c.post(ctx, payload)
+	resp, err := c.postRetrying(ctx, payload)
 	if err != nil {
 		var authErr *AuthError
 		if errors.As(err, &authErr) {
@@ -137,6 +150,28 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 		}
 	}
 	return nil
+}
+
+// postRetrying is post with a short wait-and-retry on HTTP 429. Anything
+// else, including the final 429, is returned to Call as-is.
+func (c *Client) postRetrying(ctx context.Context, payload []byte) (*http.Response, error) {
+	delay := c.retryDelay
+	if delay <= 0 {
+		delay = defaultRetryDelay
+	}
+	for attempt := 0; ; attempt++ {
+		resp, err := c.post(ctx, payload)
+		if err != nil || resp.StatusCode != http.StatusTooManyRequests || attempt >= tooManyRequestsRetries {
+			return resp, err
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
 }
 
 // post sends the payload, answering one digest challenge if the device

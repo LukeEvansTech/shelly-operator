@@ -59,6 +59,17 @@ var (
 		"1 if the device reports a setting that needs a restart to take effect, 0 otherwise",
 		[]string{"mac", "name", "room", "appliance"}, nil,
 	)
+
+	// The operator's own Shelly.Update was refused and the same version is
+	// still pending. Without this a refusal is readable only on
+	// status.lastFirmwareUpdate, and the only alert is the 24h
+	// pending-firmware one -- the silent failure the operator-driven update
+	// exists to end.
+	descFirmwareUpdateRefused = prometheus.NewDesc(
+		"shelly_device_firmware_update_refused",
+		"1 if the operator's last Shelly.Update was refused and that version is still pending, 0 otherwise",
+		[]string{"mac", "name", "room", "appliance"}, nil,
+	)
 )
 
 // DeviceCollector is a prometheus.Collector that emits per-device fleet-health
@@ -86,6 +97,7 @@ func (c *DeviceCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- descInSync
 	ch <- descUpdateAvailable
 	ch <- descRestartRequired
+	ch <- descFirmwareUpdateRefused
 }
 
 // Collect implements prometheus.Collector. It lists all ShellyDevices in the
@@ -114,7 +126,18 @@ func (c *DeviceCollector) Collect(ch chan<- prometheus.Metric) {
 
 		ch <- prometheus.MustNewConstMetric(descRestartRequired, prometheus.GaugeValue,
 			boolToFloat(dev.Status.RestartRequired), mac, name, room, appliance)
+
+		ch <- prometheus.MustNewConstMetric(descFirmwareUpdateRefused, prometheus.GaugeValue,
+			boolToFloat(updateRefused(dev)), mac, name, room, appliance)
 	}
+}
+
+// updateRefused reports a refusal that still matters: the last attempt was
+// refused AND its target is still the pending version. A refusal for a
+// version that has since been installed or superseded reads 0.
+func updateRefused(dev *shellyv1alpha1.ShellyDevice) bool {
+	a := dev.Status.LastFirmwareUpdate
+	return a != nil && a.Refused && a.Target != "" && a.Target == dev.Status.AvailableFirmware
 }
 
 // labelValues returns the mac, name, room and appliance label values for a

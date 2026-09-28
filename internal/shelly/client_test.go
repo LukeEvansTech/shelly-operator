@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly"
 	"github.com/LukeEvansTech/shelly-operator/internal/shelly/shellytest"
@@ -96,5 +98,48 @@ func TestRebootCallsRPC(t *testing.T) {
 	}
 	if fake.RestartRequired {
 		t.Error("device should have cleared restart_required after the reboot")
+	}
+}
+
+// tooManyThen answers 429 for the first n requests, then a valid RPC result.
+func tooManyThen(n int32) (*httptest.Server, *atomic.Int32) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) <= n {
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":1,"result":{"mac":"AABBCCDDEEFF"}}`))
+	}))
+	return srv, &hits
+}
+
+// A 429 that clears (as firmware 2.0.0's nonce-table 429s did within ~5s)
+// must not fail the call.
+func TestCallRetriesTooManyRequests(t *testing.T) {
+	srv, hits := tooManyThen(2)
+	defer srv.Close()
+	c := shelly.NewClient(hostOf(srv.URL), shelly.WithRetryDelay(time.Millisecond))
+	var got shelly.DeviceInfo
+	if err := c.Call(context.Background(), "Shelly.GetDeviceInfo", nil, &got); err != nil {
+		t.Fatalf("Call after two 429s: %v", err)
+	}
+	if hits.Load() != 3 {
+		t.Errorf("requests = %d, want 3", hits.Load())
+	}
+}
+
+// A device that keeps answering 429 is given up on after the retries, and
+// the error still reads as a refusal.
+func TestCallGivesUpOnPersistentTooManyRequests(t *testing.T) {
+	srv, hits := tooManyThen(100)
+	defer srv.Close()
+	c := shelly.NewClient(hostOf(srv.URL), shelly.WithRetryDelay(time.Millisecond))
+	err := c.Call(context.Background(), "Shelly.GetDeviceInfo", nil, nil)
+	if err == nil || !shelly.IsRefusal(err) {
+		t.Fatalf("err = %v, want a refusal after persistent 429s", err)
+	}
+	if hits.Load() != 3 {
+		t.Errorf("requests = %d, want 3 (1 + 2 retries)", hits.Load())
 	}
 }

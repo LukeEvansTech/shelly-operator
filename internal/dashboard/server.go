@@ -5,6 +5,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"errors"
@@ -116,7 +117,15 @@ func syncState(d *shellyv1alpha1.ShellyDevice) (string, string) {
 
 func render(w http.ResponseWriter, t *template.Template, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
+	// Render into a buffer first: once ExecuteTemplate has written part of
+	// the page the status is already sent, so a late error could only
+	// produce a "superfluous WriteHeader" log line and a truncated page,
+	// with the actual cause thrown away.
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, "layout", data); err != nil {
+		logf.Log.WithName("dashboard").Error(err, "rendering page")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+	_, _ = buf.WriteTo(w)
 }

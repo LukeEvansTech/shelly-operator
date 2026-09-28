@@ -123,7 +123,7 @@ func render(w http.ResponseWriter, t *template.Template, data any) {
 	// with the actual cause thrown away.
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout", data); err != nil {
-		logf.Log.WithName("dashboard").Error(err, "rendering page")
+		logf.Log.WithName("dashboard").Error(err, "Failed to render dashboard page")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -2,4 +2,4 @@
 # Match go.mod's `go` line, which CI's setup-go also reads. A newer local Go breaks
 # `make lint`: golangci-lint (GOLANGCI_LINT_VERSION in the Makefile) cannot read a newer
 # toolchain's export data ("export data version 4 is greater than maximum supported").
-go = "1.26.0"
+go = "1.27.1"

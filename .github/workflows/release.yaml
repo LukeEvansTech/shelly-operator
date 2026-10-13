@@ -13,6 +13,7 @@ env:
 jobs:
   image:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
@@ -68,6 +69,7 @@ jobs:
 
   chart:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
